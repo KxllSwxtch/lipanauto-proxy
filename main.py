@@ -28,7 +28,7 @@ app.add_middleware(
 PROXY_CONFIGS = [
     {
         "name": "Decodo Proxy",
-        "proxy": "kr.decodo.com:10001",
+        "proxy": "kr.decodo.com:10000",
         "auth": "sp8oh1di2c:ToD5yssi98gmSmX9=j",
         "location": "South Korea",
         "provider": "decodo",
