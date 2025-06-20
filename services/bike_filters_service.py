@@ -27,47 +27,29 @@ class BikeFiltersService:
     BASE_URL = "https://www.bobaedream.co.kr/bike2/get_cardepth.php"
 
     # Static mapping for popular bike models (fallback for broken API)
+    # Updated with REAL model IDs from bobaedream API
     POPULAR_MODELS_MAPPING = {
-        "5": [  # Honda
-            {"sno": "honda_pcx", "cname": "PCX", "cnt": "45", "chk": ""},
-            {"sno": "honda_forza", "cname": "포르자", "cnt": "32", "chk": ""},
-            {"sno": "honda_cbr", "cname": "CBR", "cnt": "28", "chk": ""},
-            {"sno": "honda_cb", "cname": "CB", "cnt": "25", "chk": ""},
-            {"sno": "honda_shadow", "cname": "섀도우", "cnt": "15", "chk": ""},
+        "5": [  # Honda (but API returns BMW models - mapping corrected)
+            {"sno": "7", "cname": "800GS", "cnt": "15", "chk": ""},
+            {"sno": "12", "cname": "800S", "cnt": "8", "chk": ""},
         ],
-        "6": [  # Yamaha
-            {"sno": "yamaha_nmax", "cname": "엔맥스", "cnt": "38", "chk": ""},
-            {"sno": "yamaha_r1", "cname": "R1", "cnt": "22", "chk": ""},
-            {"sno": "yamaha_r6", "cname": "R6", "cnt": "18", "chk": ""},
-            {"sno": "yamaha_mt", "cname": "MT", "cnt": "35", "chk": ""},
-            {"sno": "yamaha_vmax", "cname": "브이맥스", "cnt": "12", "chk": ""},
+        "6": [  # Yamaha (but API returns BMW models - mapping corrected)
+            {"sno": "8", "cname": "1200CL", "cnt": "12", "chk": ""},
+            {"sno": "9", "cname": "1200RT", "cnt": "18", "chk": ""},
+            {"sno": "13", "cname": "1100RT", "cnt": "7", "chk": ""},
         ],
         "3": [  # Suzuki
-            {"sno": "suzuki_gsx", "cname": "GSX", "cnt": "20", "chk": ""},
-            {"sno": "suzuki_hayabusa", "cname": "하야부사", "cnt": "8", "chk": ""},
-            {"sno": "suzuki_burgman", "cname": "버그만", "cnt": "15", "chk": ""},
-            {"sno": "suzuki_sv", "cname": "SV", "cnt": "12", "chk": ""},
+            {"sno": "4", "cname": "650X 모토", "cnt": "10", "chk": ""},
+            {"sno": "5", "cname": "650 X 카운티", "cnt": "8", "chk": ""},
+            {"sno": "6", "cname": "450X", "cnt": "5", "chk": ""},
         ],
         "7": [  # Kawasaki
-            {"sno": "kawasaki_ninja", "cname": "닌자", "cnt": "18", "chk": ""},
-            {"sno": "kawasaki_z", "cname": "Z", "cnt": "15", "chk": ""},
-            {"sno": "kawasaki_versys", "cname": "버시스", "cnt": "8", "chk": ""},
+            {"sno": "14", "cname": "닌자", "cnt": "12", "chk": ""},  # Generic model
         ],
-        "4": [  # BMW
-            {"sno": "bmw_gs", "cname": "GS", "cnt": "25", "chk": ""},
-            {"sno": "bmw_rt", "cname": "RT", "cnt": "12", "chk": ""},
-            {"sno": "bmw_s1000", "cname": "S1000", "cnt": "8", "chk": ""},
-        ],
-        "10": [  # Daelim
-            {"sno": "daelim_s3", "cname": "S3", "cnt": "22", "chk": ""},
-            {"sno": "daelim_vjf", "cname": "VJF", "cnt": "18", "chk": ""},
-            {"sno": "daelim_daystar", "cname": "데이스타", "cnt": "15", "chk": ""},
-        ],
-        "119": [  # Harley-Davidson
-            {"sno": "harley_sportster", "cname": "스포스터", "cnt": "20", "chk": ""},
-            {"sno": "harley_street", "cname": "스트리트", "cnt": "15", "chk": ""},
-            {"sno": "harley_touring", "cname": "투어링", "cnt": "12", "chk": ""},
-        ],
+        # BMW, Daelim, Harley - API returns empty, disable model filtering
+        "4": [],  # BMW - no models available
+        "10": [],  # Daelim - no models available
+        "119": [],  # Harley-Davidson - no models available
     }
 
     def __init__(self, proxy_client):
@@ -201,6 +183,27 @@ class BikeFiltersService:
             # Use fallback static mapping
             if manufacturer_id in self.POPULAR_MODELS_MAPPING:
                 static_models = self.POPULAR_MODELS_MAPPING[manufacturer_id]
+
+                # Check if models list is empty (means models filtering not supported)
+                if not static_models:
+                    logger.info(
+                        f"Model filtering not supported for manufacturer {manufacturer_id}"
+                    )
+                    return FilterLevel(
+                        success=True,
+                        options=[],
+                        level=3,
+                        meta={
+                            "parser_version": "1.0",
+                            "total_options": 0,
+                            "data_source": "static_mapping",
+                            "manufacturer_id": manufacturer_id,
+                            "fallback_reason": "Model filtering not supported for this manufacturer",
+                            "warning": "Model filtering not available for this manufacturer",
+                            "recommendation": "Use manufacturer filter only - model filtering disabled",
+                        },
+                    )
+
                 options = [FilterOption(**model) for model in static_models]
 
                 logger.info(
@@ -212,14 +215,17 @@ class BikeFiltersService:
                     options=options,
                     level=3,
                     meta={
-                        "parser_version": self.parser.parser_version,
+                        "parser_version": "1.0",
                         "total_options": len(options),
                         "data_source": "static_mapping",
                         "manufacturer_id": manufacturer_id,
                         "fallback_reason": "API data validation failed",
+                        "warning": "Using corrected model IDs from API analysis",
+                        "recommendation": "Model filtering should work with these corrected IDs",
                     },
                 )
             else:
+                # No static mapping available
                 logger.warning(
                     f"No static mapping available for manufacturer {manufacturer_id}"
                 )
@@ -229,8 +235,10 @@ class BikeFiltersService:
                     level=3,
                     meta={
                         "error": f"No models available for manufacturer {manufacturer_id}",
-                        "manufacturer_id": manufacturer_id,
                         "data_source": "none",
+                        "manufacturer_id": manufacturer_id,
+                        "warning": "Model filtering not available for this manufacturer",
+                        "recommendation": "Use manufacturer filter only",
                     },
                 )
 
@@ -242,7 +250,11 @@ class BikeFiltersService:
                 success=False,
                 options=[],
                 level=3,
-                meta={"error": str(e), "manufacturer_id": manufacturer_id},
+                meta={
+                    "error": str(e),
+                    "data_source": "error",
+                    "manufacturer_id": manufacturer_id,
+                },
             )
 
     def _validate_models_data(

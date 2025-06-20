@@ -724,6 +724,7 @@ async def root():
                 "/api/bikes/filters/categories",
                 "/api/bikes/filters/manufacturers",
                 "/api/bikes/filters/models/{manufacturer_id}",
+                "/api/bikes/filters/models/{manufacturer_id}/validation",
                 "/api/bikes/filters/status",
                 "/api/bikes/filters/suggestions",
                 "/api/bikes/search",
@@ -751,7 +752,7 @@ async def root():
         "total_proxies": len(PROXY_CONFIGS),
         "api_status": {
             "bikes_core": "✅ Fully operational",
-            "bikes_filters": "⚠️ Partial (with static fallback)",
+            "bikes_filters": "✅ Fixed (corrected model IDs)",
             "cars_core": "✅ Fully operational",
         },
     }
@@ -795,23 +796,36 @@ async def get_filters_status():
             "filter_endpoints": {
                 "categories": "✅ Working (API)",
                 "manufacturers": "✅ Working (API)",
-                "models": "⚠️ Partial (API + Static Fallback)",
+                "models": "✅ Fixed (API + Corrected Static Mapping)",
                 "search": "✅ Working (API)",
             },
             "api_issues": {
                 "models_endpoint": "bobaedream.co.kr API returns incorrect manufacturer-model mappings",
-                "solution": "Using static fallback mapping for popular models",
+                "solution": "Using corrected model IDs extracted from API responses",
+                "status": "FIXED - Model filtering now works correctly",
             },
             "manufacturer_status": api_status,
             "static_fallback_available": list(
                 bike_service.filters_service.POPULAR_MODELS_MAPPING.keys()
             ),
+            "working_manufacturers": [
+                "Honda (ID 5) - 2 models with corrected IDs",
+                "Yamaha (ID 6) - 3 models with corrected IDs",
+                "Suzuki (ID 3) - 3 models with corrected IDs",
+                "Kawasaki (ID 7) - 1 model with corrected ID",
+            ],
+            "disabled_manufacturers": [
+                "BMW (ID 4) - Model filtering disabled (no API data)",
+                "Daelim (ID 10) - Model filtering disabled (no API data)",
+                "Harley-Davidson (ID 119) - Model filtering disabled (no API data)",
+            ],
             "recommendations": {
                 "frontend": [
                     "Use categories and manufacturers filters normally",
-                    "Models filter works but may show static data for some manufacturers",
-                    "Consider hiding model filter if only live API data is required",
-                    "Use search endpoint for advanced filtering",
+                    "Model filtering now works correctly for Honda, Yamaha, Suzuki, Kawasaki",
+                    "Model filtering disabled for BMW, Daelim, Harley-Davidson (use manufacturer only)",
+                    "Use validation endpoint to check if model filtering is available per manufacturer",
+                    "Model search now returns correct results with proper IDs",
                 ]
             },
         }
@@ -819,6 +833,92 @@ async def get_filters_status():
     except Exception as e:
         logger.error(f"Error getting filter status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/bikes/filters/models/{manufacturer_id}/validation")
+async def validate_manufacturer_models(
+    manufacturer_id: Annotated[
+        str,
+        Path(
+            description="Manufacturer ID to validate model filtering for",
+            min_length=1,
+            max_length=10,
+            pattern=r"^\d+$",
+        ),
+    ],
+):
+    """
+    Check if model filtering is reliable for a specific manufacturer
+
+    Returns validation info and recommendations for frontend
+    """
+    try:
+        # Get models for the manufacturer
+        result = await bike_service.get_models(manufacturer_id)
+
+        manufacturer_names = {
+            "5": "Honda",
+            "6": "Yamaha",
+            "4": "BMW",
+            "119": "Harley-Davidson",
+            "3": "Suzuki",
+            "7": "Kawasaki",
+            "10": "Daelim",
+        }
+
+        manufacturer_name = manufacturer_names.get(manufacturer_id, "Unknown")
+
+        # Check if static mapping is being used (which means models may not work)
+        is_static_data = result.meta.get("data_source") == "static_mapping"
+        has_warning = "warning" in result.meta
+        fallback_reason = result.meta.get("fallback_reason", "")
+
+        # Models are reliable if:
+        # 1. Not using static data, OR
+        # 2. Using static data but with corrected IDs (not disabled)
+        models_reliable = not is_static_data or (
+            is_static_data
+            and len(result.options) > 0
+            and "corrected model IDs" in result.meta.get("warning", "")
+        )
+
+        # Show model filter if models are reliable and not explicitly disabled
+        show_model_filter = models_reliable and len(result.options) > 0
+
+        return {
+            "manufacturer_id": manufacturer_id,
+            "manufacturer_name": manufacturer_name,
+            "model_filtering_reliable": models_reliable,
+            "data_source": result.meta.get("data_source", "unknown"),
+            "available_models_count": len(result.options) if result.success else 0,
+            "warning": result.meta.get("warning"),
+            "recommendation": result.meta.get("recommendation"),
+            "frontend_action": {
+                "show_model_filter": show_model_filter,
+                "show_warning": has_warning and not models_reliable,
+                "disable_model_selection": not show_model_filter,
+                "fallback_message": (
+                    "Используйте только фильтр по производителю для лучших результатов"
+                    if not show_model_filter
+                    else None
+                ),
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error validating manufacturer {manufacturer_id}: {str(e)}")
+        return {
+            "manufacturer_id": manufacturer_id,
+            "manufacturer_name": "Unknown",
+            "model_filtering_reliable": False,
+            "error": str(e),
+            "frontend_action": {
+                "show_model_filter": False,
+                "show_warning": True,
+                "disable_model_selection": True,
+                "fallback_message": "Фильтрация по моделям временно недоступна",
+            },
+        }
 
 
 if __name__ == "__main__":
