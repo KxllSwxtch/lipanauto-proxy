@@ -113,17 +113,22 @@ class BobaeDreamBikeParser:
 
             logger.info(f"Successfully parsed {len(bikes)} bikes")
 
+            # Extract pagination information
+            pagination_info = self._extract_pagination_info(soup)
+
             return BikeSearchResponse(
                 success=True,
                 bikes=bikes,
                 total_count=len(bikes),
-                current_page=1,
+                current_page=pagination_info.get("current_page", 1),
+                total_pages=pagination_info.get("total_pages"),
                 meta={
                     "parser_version": "2.1",
                     "encoding_detected": True,
                     "bike_links_found": len(bike_links),
                     "unique_bikes_found": len(unique_links),
                     "successfully_parsed": len(bikes),
+                    "pagination": pagination_info,
                 },
             )
 
@@ -229,6 +234,92 @@ class BobaeDreamBikeParser:
         except Exception as e:
             logger.warning(f"Failed to extract alternative title: {str(e)}")
             return None
+
+    def _extract_pagination_info(self, soup: BeautifulSoup) -> Dict[str, Optional[int]]:
+        """
+        Extract pagination information from the page
+
+        Returns:
+            Dict with current_page and total_pages information
+        """
+        try:
+            pagination_info = {"current_page": 1, "total_pages": None, "page_links": []}
+
+            # Look for pagination section - usually contains page links
+            # Pattern: <b>1</b> | <a href="...page=2">2</a> | ... | <a href="...page=28">28</a>
+
+            # Find all page links
+            page_links = soup.find_all("a", href=lambda x: x and "page=" in x)
+
+            if page_links:
+                page_numbers = []
+
+                for link in page_links:
+                    href = link.get("href", "")
+                    page_match = re.search(r"page=(\d+)", href)
+                    if page_match:
+                        page_num = int(page_match.group(1))
+                        page_numbers.append(page_num)
+                        pagination_info["page_links"].append(
+                            {"page": page_num, "url": href}
+                        )
+
+                if page_numbers:
+                    # The highest page number is likely the total pages
+                    pagination_info["total_pages"] = max(page_numbers)
+                    logger.info(f"Found pagination: max page = {max(page_numbers)}")
+
+            # Look for current page indicator (usually marked with <b> tag)
+            # Pattern: <b>1</b> indicates current page is 1
+            current_page_elements = soup.find_all("b")
+            for element in current_page_elements:
+                text = element.get_text(strip=True)
+                if text.isdigit():
+                    # Check if this is in a pagination context
+                    parent_text = element.parent.get_text() if element.parent else ""
+                    # If it's surrounded by page links, it's likely the current page
+                    if "|" in parent_text or "page=" in parent_text:
+                        pagination_info["current_page"] = int(text)
+                        logger.info(f"Found current page: {text}")
+                        break
+
+            # Alternative method: look for pagination table/container
+            if not pagination_info["total_pages"]:
+                # Look for elements containing multiple page numbers
+                for element in soup.find_all(
+                    ["td", "div"], string=re.compile(r"\d+.*\d+")
+                ):
+                    text = element.get_text()
+                    # Look for patterns like "1 | 2 | 3 | ... | 28"
+                    if "|" in text and "page=" in str(element.parent):
+                        numbers = re.findall(r"\b(\d+)\b", text)
+                        if numbers:
+                            max_page = max(int(n) for n in numbers if int(n) > 0)
+                            if max_page > 1:
+                                pagination_info["total_pages"] = max_page
+                                logger.info(
+                                    f"Found total pages via pattern matching: {max_page}"
+                                )
+                                break
+
+            # Final fallback: estimate based on number of bikes per page
+            if (
+                not pagination_info["total_pages"]
+                and len(pagination_info["page_links"]) > 0
+            ):
+                # If we have page links but no clear total, use the highest link + some buffer
+                max_link_page = max(
+                    link["page"] for link in pagination_info["page_links"]
+                )
+                pagination_info["total_pages"] = max_link_page
+                logger.info(f"Estimated total pages from links: {max_link_page}")
+
+            logger.info(f"Pagination info extracted: {pagination_info}")
+            return pagination_info
+
+        except Exception as e:
+            logger.warning(f"Failed to extract pagination info: {str(e)}")
+            return {"current_page": 1, "total_pages": None, "page_links": []}
 
     def _extract_bike_info_from_row(
         self, row: Tag, link: Tag
