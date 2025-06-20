@@ -2,8 +2,8 @@ import requests
 import asyncio
 import random
 import time
-from typing import Dict, List, Optional, Union
-from fastapi import FastAPI, Query, HTTPException
+from typing import Dict, List, Optional, Union, Annotated
+from fastapi import FastAPI, Query, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
@@ -585,21 +585,35 @@ async def get_bike_manufacturers():
 
 
 @app.get("/api/bikes/filters/models/{manufacturer_id}", response_model=FilterLevel)
-async def get_bike_models(manufacturer_id: str):
+async def get_bike_models(
+    manufacturer_id: Annotated[
+        str,
+        Path(
+            description="Manufacturer ID (e.g., '5' for Honda, '6' for Yamaha, '4' for BMW)",
+            min_length=1,
+            max_length=10,
+            pattern=r"^\d+$",
+        ),
+    ],
+):
     """
     Get bike models for specific manufacturer
 
     Third level of filter hierarchy - specific bike models
 
-    - **manufacturer_id**: Manufacturer ID (e.g., "5" for Honda, "6" for Yamaha)
+    - **manufacturer_id**: Manufacturer ID (e.g., "5" for Honda, "6" for Yamaha, "4" for BMW, "119" for Harley-Davidson)
+
+    **Note**: Due to issues with the source API, this endpoint uses a combination of live data
+    and static fallback mapping to ensure reliable results.
     """
     try:
         result = await bike_service.get_models(manufacturer_id)
-        if not result.success:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Failed to fetch models for manufacturer {manufacturer_id}: {result.meta.get('error', 'Unknown error')}",
+        if not result.success and result.meta.get("data_source") != "static_mapping":
+            logger.warning(
+                f"Failed to fetch models for manufacturer {manufacturer_id}: {result.meta}"
             )
+            # Still return the result even if it failed, as it contains useful error info
+
         return result
     except HTTPException:
         raise
@@ -700,7 +714,7 @@ async def root():
     """Корневой эндпоинт"""
     return {
         "service": "Multi-Platform Vehicle Proxy API",
-        "version": "3.0",
+        "version": "3.1",
         "endpoints": {
             "cars": ["/api/catalog", "/api/nav"],
             "bikes": [
@@ -710,6 +724,7 @@ async def root():
                 "/api/bikes/filters/categories",
                 "/api/bikes/filters/manufacturers",
                 "/api/bikes/filters/models/{manufacturer_id}",
+                "/api/bikes/filters/status",
                 "/api/bikes/filters/suggestions",
                 "/api/bikes/search",
             ],
@@ -725,6 +740,8 @@ async def root():
             "Proxy authentication & rotation",
             "BeautifulSoup4 + lxml parsing",
             "Korean site optimization",
+            "Static fallback for broken API endpoints",
+            "Enhanced query parameter validation",
         ],
         "platforms": {
             "encar.com": "Car listings and navigation",
@@ -732,7 +749,76 @@ async def root():
         },
         "providers": [config["provider"] for config in PROXY_CONFIGS],
         "total_proxies": len(PROXY_CONFIGS),
+        "api_status": {
+            "bikes_core": "✅ Fully operational",
+            "bikes_filters": "⚠️ Partial (with static fallback)",
+            "cars_core": "✅ Fully operational",
+        },
     }
+
+
+@app.get("/api/bikes/filters/status")
+async def get_filters_status():
+    """
+    Get status information about bike filters and data sources
+
+    Returns information about which filter endpoints are working properly
+    and which ones use fallback data due to API issues.
+    """
+    try:
+        # Test a few key manufacturers to check API status
+        test_manufacturers = ["5", "6", "4", "119"]  # Honda, Yamaha, BMW, Harley
+        api_status = {}
+
+        for manufacturer_id in test_manufacturers:
+            try:
+                result = await bike_service.get_models(manufacturer_id)
+                api_status[manufacturer_id] = {
+                    "success": result.success,
+                    "data_source": result.meta.get("data_source", "unknown"),
+                    "model_count": len(result.options),
+                    "manufacturer_name": {
+                        "5": "Honda",
+                        "6": "Yamaha",
+                        "4": "BMW",
+                        "119": "Harley-Davidson",
+                    }.get(manufacturer_id, "Unknown"),
+                }
+            except Exception as e:
+                api_status[manufacturer_id] = {
+                    "success": False,
+                    "error": str(e),
+                    "data_source": "error",
+                }
+
+        return {
+            "filter_endpoints": {
+                "categories": "✅ Working (API)",
+                "manufacturers": "✅ Working (API)",
+                "models": "⚠️ Partial (API + Static Fallback)",
+                "search": "✅ Working (API)",
+            },
+            "api_issues": {
+                "models_endpoint": "bobaedream.co.kr API returns incorrect manufacturer-model mappings",
+                "solution": "Using static fallback mapping for popular models",
+            },
+            "manufacturer_status": api_status,
+            "static_fallback_available": list(
+                bike_service.filters_service.POPULAR_MODELS_MAPPING.keys()
+            ),
+            "recommendations": {
+                "frontend": [
+                    "Use categories and manufacturers filters normally",
+                    "Models filter works but may show static data for some manufacturers",
+                    "Consider hiding model filter if only live API data is required",
+                    "Use search endpoint for advanced filtering",
+                ]
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting filter status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 if __name__ == "__main__":

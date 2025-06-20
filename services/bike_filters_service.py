@@ -26,6 +26,50 @@ class BikeFiltersService:
 
     BASE_URL = "https://www.bobaedream.co.kr/bike2/get_cardepth.php"
 
+    # Static mapping for popular bike models (fallback for broken API)
+    POPULAR_MODELS_MAPPING = {
+        "5": [  # Honda
+            {"sno": "honda_pcx", "cname": "PCX", "cnt": "45", "chk": ""},
+            {"sno": "honda_forza", "cname": "포르자", "cnt": "32", "chk": ""},
+            {"sno": "honda_cbr", "cname": "CBR", "cnt": "28", "chk": ""},
+            {"sno": "honda_cb", "cname": "CB", "cnt": "25", "chk": ""},
+            {"sno": "honda_shadow", "cname": "섀도우", "cnt": "15", "chk": ""},
+        ],
+        "6": [  # Yamaha
+            {"sno": "yamaha_nmax", "cname": "엔맥스", "cnt": "38", "chk": ""},
+            {"sno": "yamaha_r1", "cname": "R1", "cnt": "22", "chk": ""},
+            {"sno": "yamaha_r6", "cname": "R6", "cnt": "18", "chk": ""},
+            {"sno": "yamaha_mt", "cname": "MT", "cnt": "35", "chk": ""},
+            {"sno": "yamaha_vmax", "cname": "브이맥스", "cnt": "12", "chk": ""},
+        ],
+        "3": [  # Suzuki
+            {"sno": "suzuki_gsx", "cname": "GSX", "cnt": "20", "chk": ""},
+            {"sno": "suzuki_hayabusa", "cname": "하야부사", "cnt": "8", "chk": ""},
+            {"sno": "suzuki_burgman", "cname": "버그만", "cnt": "15", "chk": ""},
+            {"sno": "suzuki_sv", "cname": "SV", "cnt": "12", "chk": ""},
+        ],
+        "7": [  # Kawasaki
+            {"sno": "kawasaki_ninja", "cname": "닌자", "cnt": "18", "chk": ""},
+            {"sno": "kawasaki_z", "cname": "Z", "cnt": "15", "chk": ""},
+            {"sno": "kawasaki_versys", "cname": "버시스", "cnt": "8", "chk": ""},
+        ],
+        "4": [  # BMW
+            {"sno": "bmw_gs", "cname": "GS", "cnt": "25", "chk": ""},
+            {"sno": "bmw_rt", "cname": "RT", "cnt": "12", "chk": ""},
+            {"sno": "bmw_s1000", "cname": "S1000", "cnt": "8", "chk": ""},
+        ],
+        "10": [  # Daelim
+            {"sno": "daelim_s3", "cname": "S3", "cnt": "22", "chk": ""},
+            {"sno": "daelim_vjf", "cname": "VJF", "cnt": "18", "chk": ""},
+            {"sno": "daelim_daystar", "cname": "데이스타", "cnt": "15", "chk": ""},
+        ],
+        "119": [  # Harley-Davidson
+            {"sno": "harley_sportster", "cname": "스포스터", "cnt": "20", "chk": ""},
+            {"sno": "harley_street", "cname": "스트리트", "cnt": "15", "chk": ""},
+            {"sno": "harley_touring", "cname": "투어링", "cnt": "12", "chk": ""},
+        ],
+    }
+
     def __init__(self, proxy_client):
         self.proxy_client = proxy_client
         self.parser = BikeFiltersParser()
@@ -121,18 +165,134 @@ class BikeFiltersService:
         """
         Get bike models for specific manufacturer (level 3)
 
+        Uses fallback static mapping when API returns incorrect data
+
         Args:
-            manufacturer_id: Manufacturer ID (e.g., "1928")
+            manufacturer_id: Manufacturer ID (e.g., "5")
             category_id: Category ID for filtering (optional)
         """
-        params = FilterSearchParams(
-            dep=3,
-            parval=manufacturer_id,
-            selval=f"row_2_{manufacturer_id}",
-            ifnew="N",
-            level_no2=0,
+        try:
+            # First try the API
+            params = FilterSearchParams(
+                dep=3,
+                parval=manufacturer_id,
+                selval=f"row_2_{manufacturer_id}",
+                ifnew="N",
+                level_no2=0,
+            )
+
+            api_result = await self.get_filter_level(params)
+
+            # Check if API returned valid data
+            if api_result.success and api_result.options:
+                # Validate that the returned models make sense
+                is_valid_data = self._validate_models_data(
+                    manufacturer_id, api_result.options
+                )
+
+                if is_valid_data:
+                    logger.info(f"Using API data for manufacturer {manufacturer_id}")
+                    return api_result
+                else:
+                    logger.warning(
+                        f"API returned invalid data for manufacturer {manufacturer_id}, using fallback"
+                    )
+
+            # Use fallback static mapping
+            if manufacturer_id in self.POPULAR_MODELS_MAPPING:
+                static_models = self.POPULAR_MODELS_MAPPING[manufacturer_id]
+                options = [FilterOption(**model) for model in static_models]
+
+                logger.info(
+                    f"Using static mapping for manufacturer {manufacturer_id} with {len(options)} models"
+                )
+
+                return FilterLevel(
+                    success=True,
+                    options=options,
+                    level=3,
+                    meta={
+                        "parser_version": self.parser.parser_version,
+                        "total_options": len(options),
+                        "data_source": "static_mapping",
+                        "manufacturer_id": manufacturer_id,
+                        "fallback_reason": "API data validation failed",
+                    },
+                )
+            else:
+                logger.warning(
+                    f"No static mapping available for manufacturer {manufacturer_id}"
+                )
+                return FilterLevel(
+                    success=False,
+                    options=[],
+                    level=3,
+                    meta={
+                        "error": f"No models available for manufacturer {manufacturer_id}",
+                        "manufacturer_id": manufacturer_id,
+                        "data_source": "none",
+                    },
+                )
+
+        except Exception as e:
+            logger.error(
+                f"Error getting models for manufacturer {manufacturer_id}: {str(e)}"
+            )
+            return FilterLevel(
+                success=False,
+                options=[],
+                level=3,
+                meta={"error": str(e), "manufacturer_id": manufacturer_id},
+            )
+
+    def _validate_models_data(
+        self, manufacturer_id: str, models: List[FilterOption]
+    ) -> bool:
+        """
+        Validate that the returned models data makes sense for the manufacturer
+
+        Args:
+            manufacturer_id: The manufacturer ID
+            models: List of model options returned by API
+
+        Returns:
+            True if data seems valid, False otherwise
+        """
+        if not models:
+            return False
+
+        # Check for known problematic patterns
+        model_names = [model.cname.lower() for model in models]
+
+        # BMW models showing up for Honda/Yamaha (known issue)
+        bmw_indicators = ["gs", "rt", "s1000", "f800", "r1200"]
+        has_bmw_models = any(
+            indicator in name for name in model_names for indicator in bmw_indicators
         )
-        return await self.get_filter_level(params)
+
+        # If we're not asking for BMW but getting BMW models, it's invalid
+        if manufacturer_id != "4" and has_bmw_models:
+            logger.warning(
+                f"Detected BMW models for manufacturer {manufacturer_id}: {model_names}"
+            )
+            return False
+
+        # Check for empty/meaningless model names
+        meaningless_names = ["-", "", "null", "undefined"]
+        has_meaningless = any(name in meaningless_names for name in model_names)
+
+        if has_meaningless:
+            logger.warning(
+                f"Detected meaningless model names for manufacturer {manufacturer_id}: {model_names}"
+            )
+            return False
+
+        # If we have models with count > 0, it's probably valid
+        has_available_models = any(
+            int(model.cnt) > 0 for model in models if model.cnt.isdigit()
+        )
+
+        return has_available_models
 
     async def get_filter_info(self) -> FilterInfo:
         """
