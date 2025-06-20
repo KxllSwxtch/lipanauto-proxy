@@ -422,6 +422,10 @@ class BikeService:
         """Get models for specific manufacturer"""
         return await self.filters_service.get_models(manufacturer_id)
 
+    async def get_submodels(self, manufacturer_id: str, model_id: str):
+        """Get submodels for specific manufacturer and model"""
+        return await self.filters_service.get_submodels(manufacturer_id, model_id)
+
     def get_filter_suggestions(self):
         """Get filter suggestions for common searches"""
         return self.filters_service.get_filter_suggestions()

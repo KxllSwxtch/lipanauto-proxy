@@ -22,6 +22,11 @@ class BikeFiltersService:
     """
     Service for managing bike filter operations
     Integrates with bobaedream.co.kr filter API
+
+    Hierarchy:
+    - depth-1 (dep=1): Manufacturers (제조사)
+    - depth-2 (dep=2): Models (모델)
+    - depth-3 (dep=3): Submodels (서브모델/세부모델)
     """
 
     BASE_URL = "https://www.bobaedream.co.kr/bike2/get_cardepth.php"
@@ -137,7 +142,7 @@ class BikeFiltersService:
         return await self.get_filter_level(params)
 
     async def get_manufacturers(self) -> FilterLevel:
-        """Get bike manufacturers (level 1)"""
+        """Get bike manufacturers (depth-1)"""
         params = FilterSearchParams(dep=1, parval="", selval="", ifnew="N", level_no2=0)
         return await self.get_filter_level(params)
 
@@ -145,99 +150,60 @@ class BikeFiltersService:
         self, manufacturer_id: str, category_id: str = ""
     ) -> FilterLevel:
         """
-        Get bike models for specific manufacturer (level 3)
+        Get bike models for specific manufacturer (depth-2)
 
-        Uses fallback static mapping when API returns incorrect data
+        FIXED: Now uses correct depth-2 API call instead of depth-3
 
         Args:
-            manufacturer_id: Manufacturer ID (e.g., "5")
+            manufacturer_id: Manufacturer ID (e.g., "5", "119")
             category_id: Category ID for filtering (optional)
         """
         try:
-            # First try the API
+            logger.info(
+                f"Getting models for manufacturer {manufacturer_id} using depth-2 API"
+            )
+
+            # Use depth-2 for models (this was the bug!)
             params = FilterSearchParams(
-                dep=3,
+                dep=2,  # CHANGED: was 3, now 2 (models are depth-2)
                 parval=manufacturer_id,
-                selval=f"row_2_{manufacturer_id}",
+                selval=f"row_1_{manufacturer_id}",  # CHANGED: was row_2_, now row_1_
                 ifnew="N",
                 level_no2=0,
             )
 
-            api_result = await self.get_filter_level(params)
+            result = await self.get_filter_level(params)
 
-            # Check if API returned valid data
-            if api_result.success and api_result.options:
-                # Validate that the returned models make sense
-                is_valid_data = self._validate_models_data(
-                    manufacturer_id, api_result.options
-                )
-
-                if is_valid_data:
-                    logger.info(f"Using API data for manufacturer {manufacturer_id}")
-                    return api_result
-                else:
-                    logger.warning(
-                        f"API returned invalid data for manufacturer {manufacturer_id}, using fallback"
-                    )
-
-            # Use fallback static mapping
-            if manufacturer_id in self.POPULAR_MODELS_MAPPING:
-                static_models = self.POPULAR_MODELS_MAPPING[manufacturer_id]
-
-                # Check if models list is empty (means models filtering not supported)
-                if not static_models:
-                    logger.info(
-                        f"Model filtering not supported for manufacturer {manufacturer_id}"
-                    )
-                    return FilterLevel(
-                        success=True,
-                        options=[],
-                        level=3,
-                        meta={
-                            "parser_version": "1.0",
-                            "total_options": 0,
-                            "data_source": "static_mapping",
-                            "manufacturer_id": manufacturer_id,
-                            "fallback_reason": "Model filtering not supported for this manufacturer",
-                            "warning": "Model filtering not available for this manufacturer",
-                            "recommendation": "Use manufacturer filter only - model filtering disabled",
-                        },
-                    )
-
-                options = [FilterOption(**model) for model in static_models]
-
+            if result.success and result.options:
                 logger.info(
-                    f"Using static mapping for manufacturer {manufacturer_id} with {len(options)} models"
+                    f"Successfully got {len(result.options)} models for manufacturer {manufacturer_id}"
                 )
 
+                # Add manufacturer info to metadata
+                result.meta.update(
+                    {
+                        "manufacturer_id": manufacturer_id,
+                        "data_source": "api",
+                        "api_level": "depth-2",
+                        "note": "Using corrected depth-2 API call for models",
+                    }
+                )
+
+                return result
+            else:
+                # If no models found, return empty but successful result
+                logger.info(
+                    f"No models found for manufacturer {manufacturer_id} (this may be normal)"
+                )
                 return FilterLevel(
                     success=True,
-                    options=options,
-                    level=3,
-                    meta={
-                        "parser_version": "1.0",
-                        "total_options": len(options),
-                        "data_source": "static_mapping",
-                        "manufacturer_id": manufacturer_id,
-                        "fallback_reason": "API data validation failed",
-                        "warning": "Using corrected model IDs from API analysis",
-                        "recommendation": "Model filtering should work with these corrected IDs",
-                    },
-                )
-            else:
-                # No static mapping available
-                logger.warning(
-                    f"No static mapping available for manufacturer {manufacturer_id}"
-                )
-                return FilterLevel(
-                    success=False,
                     options=[],
-                    level=3,
+                    level=2,
                     meta={
-                        "error": f"No models available for manufacturer {manufacturer_id}",
-                        "data_source": "none",
                         "manufacturer_id": manufacturer_id,
-                        "warning": "Model filtering not available for this manufacturer",
+                        "data_source": "api",
+                        "api_level": "depth-2",
+                        "note": "No models available for this manufacturer",
                         "recommendation": "Use manufacturer filter only",
                     },
                 )
@@ -249,62 +215,68 @@ class BikeFiltersService:
             return FilterLevel(
                 success=False,
                 options=[],
-                level=3,
+                level=2,
                 meta={
                     "error": str(e),
-                    "data_source": "error",
                     "manufacturer_id": manufacturer_id,
+                    "data_source": "error",
                 },
             )
 
-    def _validate_models_data(
-        self, manufacturer_id: str, models: List[FilterOption]
-    ) -> bool:
+    async def get_submodels(self, manufacturer_id: str, model_id: str) -> FilterLevel:
         """
-        Validate that the returned models data makes sense for the manufacturer
+        Get bike submodels for specific manufacturer and model (depth-3)
+
+        NEW: Proper depth-3 implementation for detailed model variants
 
         Args:
-            manufacturer_id: The manufacturer ID
-            models: List of model options returned by API
-
-        Returns:
-            True if data seems valid, False otherwise
+            manufacturer_id: Manufacturer ID (e.g., "119")
+            model_id: Model ID (e.g., "336" for Sportster)
         """
-        if not models:
-            return False
-
-        # Check for known problematic patterns
-        model_names = [model.cname.lower() for model in models]
-
-        # BMW models showing up for Honda/Yamaha (known issue)
-        bmw_indicators = ["gs", "rt", "s1000", "f800", "r1200"]
-        has_bmw_models = any(
-            indicator in name for name in model_names for indicator in bmw_indicators
-        )
-
-        # If we're not asking for BMW but getting BMW models, it's invalid
-        if manufacturer_id != "4" and has_bmw_models:
-            logger.warning(
-                f"Detected BMW models for manufacturer {manufacturer_id}: {model_names}"
+        try:
+            logger.info(
+                f"Getting submodels for manufacturer {manufacturer_id}, model {model_id}"
             )
-            return False
 
-        # Check for empty/meaningless model names
-        meaningless_names = ["-", "", "null", "undefined"]
-        has_meaningless = any(name in meaningless_names for name in model_names)
-
-        if has_meaningless:
-            logger.warning(
-                f"Detected meaningless model names for manufacturer {manufacturer_id}: {model_names}"
+            # Use depth-3 for submodels
+            params = FilterSearchParams(
+                dep=3,
+                parval=model_id,
+                selval=f"row_2_{model_id}",
+                ifnew="N",
+                level_no2=0,
             )
-            return False
 
-        # If we have models with count > 0, it's probably valid
-        has_available_models = any(
-            int(model.cnt) > 0 for model in models if model.cnt.isdigit()
-        )
+            result = await self.get_filter_level(params)
 
-        return has_available_models
+            if result.success:
+                logger.info(f"Got {len(result.options)} submodels for model {model_id}")
+
+                result.meta.update(
+                    {
+                        "manufacturer_id": manufacturer_id,
+                        "model_id": model_id,
+                        "data_source": "api",
+                        "api_level": "depth-3",
+                        "note": "Detailed model variants/submodels",
+                    }
+                )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error getting submodels for model {model_id}: {str(e)}")
+            return FilterLevel(
+                success=False,
+                options=[],
+                level=3,
+                meta={
+                    "error": str(e),
+                    "manufacturer_id": manufacturer_id,
+                    "model_id": model_id,
+                    "data_source": "error",
+                },
+            )
 
     async def get_filter_info(self) -> FilterInfo:
         """
