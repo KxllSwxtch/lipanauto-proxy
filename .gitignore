@@ -48,3 +48,6 @@ tmp/
 *.bak
 
 venv/
+bobadream/
+
+__pycache__/

@@ -9,6 +9,16 @@ from fastapi.responses import JSONResponse
 import logging
 import uuid
 
+# New imports for bike functionality
+from schemas.bikes import BikeSearchParams, BikeSearchResponse
+from schemas.bike_filters import (
+    FilterLevel,
+    FilterInfo,
+    FilterSearchParams,
+    BikeSearchFilters,
+)
+from services.bike_service import BikeService
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -290,6 +300,9 @@ class EncarProxyClient:
 # Глобальный клиент
 proxy_client = EncarProxyClient()
 
+# Initialize bike service
+bike_service = BikeService(proxy_client)
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -428,6 +441,208 @@ async def proxy_nav(
     return await handle_api_request("nav", {"count": count, "q": q, "inav": inav})
 
 
+@app.get("/api/bikes", response_model=BikeSearchResponse)
+async def get_bikes(
+    ifnew: str = Query(default="N", description="Filter: N=Used, Y=New bikes"),
+    gubun: Optional[str] = Query(
+        default=None, description="Type: K=Korean, I=Imported"
+    ),
+    tab: Optional[str] = Query(
+        default=None, description="Category: 2=Verified, 3=Premium, 4=Quick sale"
+    ),
+    page: Optional[int] = Query(default=1, description="Page number"),
+    sort: Optional[str] = Query(default=None, description="Sort order"),
+):
+    """
+    Get bike listings from bobaedream.co.kr with advanced proxy protection
+
+    - **ifnew**: N for used bikes, Y for new bikes
+    - **gubun**: K for Korean bikes, I for imported bikes
+    - **tab**: 2 for verified, 3 for premium, 4 for quick sale
+    - **page**: Page number for pagination
+    - **sort**: Sort order for results
+    """
+
+    try:
+        # Create search parameters
+        search_params = BikeSearchParams(
+            ifnew=ifnew, gubun=gubun, tab=tab, page=page, sort=sort
+        )
+
+        # Execute search using service layer
+        result = await bike_service.search_bikes(search_params)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch bike listings: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in /api/bikes endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/bikes/{bike_id}")
+async def get_bike_details(bike_id: str):
+    """
+    Get detailed information for a specific bike
+
+    - **bike_id**: Unique bike identifier from listing
+    """
+
+    try:
+        result = await bike_service.get_bike_details(bike_id)
+
+        if not result.get("success"):
+            error_detail = result.get("meta", {}).get("error", "Unknown error")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Bike not found or failed to fetch: {error_detail}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching bike {bike_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/bikes/filters/info", response_model=FilterInfo)
+async def get_bike_filters():
+    """
+    Get comprehensive information about available bike search filters
+
+    Returns hierarchical filter data including:
+    - Categories (스쿠터, 레플리카, 네이키드, etc.)
+    - Manufacturers (혼다, 야마하, 대림, etc.)
+    - Popular filter combinations
+    """
+    try:
+        result = await bike_service.get_filter_info()
+        return result
+    except Exception as e:
+        logger.error(f"Error getting filter info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/bikes/filters/categories", response_model=FilterLevel)
+async def get_bike_categories():
+    """
+    Get bike categories (스쿠터, 레플리카, 네이키드, etc.)
+
+    First level of filter hierarchy - bike types
+    """
+    try:
+        result = await bike_service.get_categories()
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch categories: {result.meta.get('error', 'Unknown error')}",
+            )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting categories: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/bikes/filters/manufacturers", response_model=FilterLevel)
+async def get_bike_manufacturers():
+    """
+    Get bike manufacturers (혼다, 야마하, 대림, etc.)
+
+    Second level of filter hierarchy - bike brands
+    """
+    try:
+        result = await bike_service.get_manufacturers()
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch manufacturers: {result.meta.get('error', 'Unknown error')}",
+            )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting manufacturers: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/bikes/filters/models/{manufacturer_id}", response_model=FilterLevel)
+async def get_bike_models(manufacturer_id: str):
+    """
+    Get bike models for specific manufacturer
+
+    Third level of filter hierarchy - specific bike models
+
+    - **manufacturer_id**: Manufacturer ID (e.g., "5" for Honda, "6" for Yamaha)
+    """
+    try:
+        result = await bike_service.get_models(manufacturer_id)
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch models for manufacturer {manufacturer_id}: {result.meta.get('error', 'Unknown error')}",
+            )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error getting models for manufacturer {manufacturer_id}: {str(e)}"
+        )
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/bikes/filters/suggestions")
+async def get_filter_suggestions():
+    """
+    Get popular filter combinations and suggestions
+
+    Returns common search patterns and popular filter combinations
+    """
+    return bike_service.get_filter_suggestions()
+
+
+@app.post("/api/bikes/search", response_model=BikeSearchResponse)
+async def search_bikes_with_filters(filters: BikeSearchFilters):
+    """
+    Advanced bike search with comprehensive filters
+
+    Supports all available filter options including:
+    - Category (ftype1): 1=스쿠터, 4=레플리카, 5=네이키드, etc.
+    - Manufacturer (maker_no): 5=혼다, 6=야마하, 10=대림, etc.
+    - Model variations (level_no2): Multi-select model options
+    - Price range (price1, price2): In 만원 (10,000 KRW)
+    - Year range (buy_year1_1, buy_year2_1)
+    - Engine size (cc): Displacement filter
+    - Location (addr_1, addr_2): Province and district
+    - And many more advanced options...
+    """
+    try:
+        result = await bike_service.search_bikes_with_filters(filters)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to search bikes with filters: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in filtered bike search: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @app.get("/health")
 async def health_check():
     """Проверка здоровья сервиса"""
@@ -462,6 +677,11 @@ async def health_check():
             "providers": providers,
             "proxy_type": "Residential multi-provider with session rotation",
         },
+        "services": {
+            "encar_api": "✅ Active (cars)",
+            "bobaedream_bikes": "✅ Active (motorcycles)",
+            "parser_engine": "BeautifulSoup4 + lxml",
+        },
     }
 
 
@@ -469,19 +689,37 @@ async def health_check():
 async def root():
     """Корневой эндпоинт"""
     return {
-        "service": "Encar Advanced Proxy",
-        "version": "2.1",
-        "endpoints": ["/api/catalog", "/api/nav", "/health"],
+        "service": "Multi-Platform Vehicle Proxy API",
+        "version": "3.0",
+        "endpoints": {
+            "cars": ["/api/catalog", "/api/nav"],
+            "bikes": [
+                "/api/bikes",
+                "/api/bikes/{bike_id}",
+                "/api/bikes/filters/info",
+                "/api/bikes/filters/categories",
+                "/api/bikes/filters/manufacturers",
+                "/api/bikes/filters/models/{manufacturer_id}",
+                "/api/bikes/filters/suggestions",
+                "/api/bikes/search",
+            ],
+            "system": ["/health"],
+        },
         "features": [
             "User-Agent rotation",
             "Multi-provider residential proxy rotation (Korea)",
-            "IPRoyal + Oxylabs proxy pools",
             "Automatic session rotation on 403 errors",
             "Rate limiting protection",
             "Retry logic with exponential backoff",
             "Advanced error handling",
             "Proxy authentication & rotation",
+            "BeautifulSoup4 + lxml parsing",
+            "Korean site optimization",
         ],
+        "platforms": {
+            "encar.com": "Car listings and navigation",
+            "bobaedream.co.kr": "Motorcycle listings and details",
+        },
         "providers": [config["provider"] for config in PROXY_CONFIGS],
         "total_proxies": len(PROXY_CONFIGS),
     }
