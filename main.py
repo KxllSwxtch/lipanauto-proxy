@@ -10,7 +10,7 @@ import logging
 import uuid
 
 # New imports for bike functionality
-from schemas.bikes import BikeSearchParams, BikeSearchResponse
+from schemas.bikes import BikeSearchParams, BikeSearchResponse, BikeDetailResponse
 from schemas.bike_filters import (
     FilterLevel,
     FilterInfo,
@@ -485,7 +485,7 @@ async def get_bikes(
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-@app.get("/api/bikes/{bike_id}")
+@app.get("/api/bikes/{bike_id}", response_model=BikeDetailResponse)
 async def get_bike_details(bike_id: str):
     """
     Get detailed information for a specific bike
@@ -502,6 +502,16 @@ async def get_bike_details(bike_id: str):
                 status_code=404,
                 detail=f"Bike not found or failed to fetch: {error_detail}",
             )
+
+        # Ensure proper serialization of the BikeDetail object
+        bike_detail = result.get("bike")
+        if bike_detail and hasattr(bike_detail, "model_dump"):
+            # Convert BikeDetail to dict using Pydantic V2 method
+            bike_dict = bike_detail.model_dump()
+
+            # Ensure proper serialization for Pydantic V2 compatibility
+
+            result["bike"] = bike_dict
 
         return result
 

@@ -749,7 +749,7 @@ class BobaeDreamBikeParser:
             if docs_cell:
                 docs_section = docs_cell.find_next_sibling("td")
                 if docs_section:
-                    # Find all checked documents
+                    # Find all checked documents (detail_check01.gif = checked, detail_check02.gif = unchecked)
                     checked_docs = docs_section.find_all(
                         "img", src=re.compile(r"detail_check01\.gif")
                     )
@@ -762,6 +762,17 @@ class BobaeDreamBikeParser:
                                 doc_name = next_td.get_text(strip=True)
                                 if doc_name:
                                     documents.append(doc_name)
+
+                    # Alternative approach: look for all document names in the section
+                    if not documents:
+                        # Find all document labels in the section
+                        doc_labels = docs_section.find_all("td", class_="p_d_black_s1")
+
+                        # Extract all document names regardless of status for information
+                        for doc_td in doc_labels:
+                            doc_name = doc_td.get_text(strip=True)
+                            if doc_name and doc_name.strip():
+                                documents.append(f"{doc_name} (미비)")
 
         except Exception as e:
             logger.warning(f"Failed to extract documents: {str(e)}")
@@ -790,6 +801,16 @@ class BobaeDreamBikeParser:
                                 payment_name = next_td.get_text(strip=True)
                                 if payment_name:
                                     payment_methods.append(payment_name)
+
+                    # Alternative approach: look for red colored payment methods (selected)
+                    if not payment_methods:
+                        red_payments = payment_section.find_all(
+                            "td", class_="p_d_red_s1"
+                        )
+                        for payment_td in red_payments:
+                            payment_name = payment_td.get_text(strip=True)
+                            if payment_name:
+                                payment_methods.append(payment_name)
 
         except Exception as e:
             logger.warning(f"Failed to extract payment methods: {str(e)}")
@@ -871,8 +892,11 @@ class BobaeDreamBikeParser:
 
         try:
             # Find metadata text (registration date, views, favorites)
-            metadata_text = soup.find(string=re.compile(r"최초등록일:.*조회수:"))
-            if metadata_text:
+            # Look for the specific element containing metadata
+            metadata_element = soup.find("td", class_="text_08")
+            if metadata_element:
+                metadata_text = metadata_element.get_text()
+
                 # Parse registration date
                 reg_match = re.search(
                     r"최초등록일:\s*(\d{4}/\d{2}/\d{2})", metadata_text
@@ -880,10 +904,12 @@ class BobaeDreamBikeParser:
                 if reg_match:
                     metadata["registration_date"] = reg_match.group(1)
 
-                # Parse view count
-                view_match = re.search(r"조회수:\s*(\d+)", metadata_text)
-                if view_match:
-                    metadata["view_count"] = int(view_match.group(1))
+                # Parse view count (look for number in span with class text_12)
+                view_span = metadata_element.find("span", class_="text_12")
+                if view_span:
+                    view_text = view_span.get_text(strip=True)
+                    if view_text.isdigit():
+                        metadata["view_count"] = int(view_text)
 
                 # Parse today's views
                 today_match = re.search(r"오늘:(\d+)", metadata_text)
@@ -894,6 +920,50 @@ class BobaeDreamBikeParser:
                 fav_match = re.search(r"찜한회원:\s*(\d+)명", metadata_text)
                 if fav_match:
                     metadata["favorites_count"] = int(fav_match.group(1))
+
+            # Alternative approach: search in the entire page text
+            if not metadata:
+                metadata_text = soup.find(string=re.compile(r"최초등록일:.*조회수:"))
+                if metadata_text:
+                    # Parse registration date
+                    reg_match = re.search(
+                        r"최초등록일:\s*(\d{4}/\d{2}/\d{2})", metadata_text
+                    )
+                    if reg_match:
+                        metadata["registration_date"] = reg_match.group(1)
+
+                    # Parse view count
+                    view_match = re.search(r"조회수:\s*(\d+)", metadata_text)
+                    if view_match:
+                        metadata["view_count"] = int(view_match.group(1))
+
+                    # Parse today's views
+                    today_match = re.search(r"오늘:(\d+)", metadata_text)
+                    if today_match:
+                        metadata["today_views"] = int(today_match.group(1))
+
+                    # Parse favorites
+                    fav_match = re.search(r"찜한회원:\s*(\d+)명", metadata_text)
+                    if fav_match:
+                        metadata["favorites_count"] = int(fav_match.group(1))
+
+            # Extract image count from navigation
+            photo_num_span = soup.find("span", id="nPhotoNum")
+            if photo_num_span:
+                # Look for the "X/Y" pattern in the parent element
+                parent = photo_num_span.find_parent("td")
+                if parent:
+                    nav_text = parent.get_text(strip=True)
+                    if "/" in nav_text:
+                        try:
+                            parts = nav_text.split("/")
+                            if len(parts) == 2:
+                                current_num = int(parts[0])
+                                total_num = int(parts[1])
+                                metadata["current_image"] = current_num
+                                metadata["total_images"] = total_num
+                        except ValueError:
+                            pass
 
         except Exception as e:
             logger.warning(f"Failed to extract metadata: {str(e)}")
