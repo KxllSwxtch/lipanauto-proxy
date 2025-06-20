@@ -85,8 +85,8 @@ class FilterInfo(BaseModel):
     manufacturers: List[FilterOption] = Field(
         ..., description="Available manufacturers"
     )
-    popular_filters: Dict[str, List[str]] = Field(
-        default_factory=dict, description="Popular filter combinations"
+    popular_filters: Dict[str, Any] = Field(
+        default_factory=dict, description="Popular filter combinations and metadata"
     )
 
     class Config:

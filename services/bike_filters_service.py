@@ -148,7 +148,11 @@ class BikeFiltersService:
                 return FilterInfo(
                     categories=[],
                     manufacturers=[],
-                    popular_filters={"error": "Failed to fetch filter data"},
+                    popular_filters={
+                        "popular_categories": [],
+                        "popular_manufacturers": [],
+                        "errors": ["Failed to fetch filter data"],
+                    },
                 )
 
             # Filter only available options
@@ -181,7 +185,13 @@ class BikeFiltersService:
         except Exception as e:
             logger.error(f"Error getting filter info: {str(e)}")
             return FilterInfo(
-                categories=[], manufacturers=[], popular_filters={"error": str(e)}
+                categories=[],
+                manufacturers=[],
+                popular_filters={
+                    "popular_categories": [],
+                    "popular_manufacturers": [],
+                    "errors": [str(e)],
+                },
             )
 
     def build_search_url(self, filters: BikeSearchFilters) -> str:
