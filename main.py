@@ -306,7 +306,8 @@ proxy_client = EncarProxyClient()
 
 # Initialize services
 bike_service = BikeService(proxy_client)
-customs_service = CustomsCalculatorService(proxy_client)
+# Initialize customs service WITHOUT proxy for faster direct requests
+customs_service = CustomsCalculatorService(proxy_client=None)
 
 
 @app.on_event("shutdown")
@@ -792,11 +793,11 @@ async def health_check():
             "proxy_type": "Residential multi-provider with session rotation",
         },
         "services": {
-            "encar_api": "✅ Active (cars)",
-            "bobaedream_bikes": "✅ Active (motorcycles)",
-            "tks_customs": "✅ Active (customs calculator)",
+            "encar_api": "✅ Active (cars) - with proxy",
+            "bobaedream_bikes": "✅ Active (motorcycles) - with proxy",
+            "tks_customs": "🚀 OPTIMIZED (customs calculator) - direct connection + CAPTCHA caching",
             "parser_engine": "BeautifulSoup4 + lxml",
-            "captcha_solver": "CapSolver API integration",
+            "captcha_solver": "CapSolver API integration + background pre-solving",
         },
     }
 
@@ -827,12 +828,16 @@ async def root():
                 "/api/customs/calculate",
                 "/api/customs/balance",
                 "/api/customs/test",
+                "/api/customs/optimization/status",
+                "/api/customs/optimization/cache",
             ],
             "system": ["/health"],
         },
         "features": [
             "User-Agent rotation",
-            "Multi-provider residential proxy rotation (Korea)",
+            "Multi-provider residential proxy rotation (Korea) - for cars & bikes",
+            "🚀 OPTIMIZED customs calculations - CAPTCHA caching + background pre-solving",
+            "Direct connection for customs calculations (no proxy)",
             "Automatic session rotation on 403 errors",
             "Rate limiting protection",
             "Retry logic with exponential backoff",
@@ -844,9 +849,9 @@ async def root():
             "Enhanced query parameter validation",
         ],
         "platforms": {
-            "encar.com": "Car listings and navigation",
-            "bobaedream.co.kr": "Motorcycle listings and details",
-            "tks.ru": "Russian customs duty calculator",
+            "encar.com": "Car listings and navigation (via proxy)",
+            "bobaedream.co.kr": "Motorcycle listings and details (via proxy)",
+            "tks.ru": "Russian customs duty calculator (direct connection)",
         },
         "providers": [config["provider"] for config in PROXY_CONFIGS],
         "total_proxies": len(PROXY_CONFIGS),
@@ -1126,6 +1131,38 @@ async def test_customs_calculation():
 
     except Exception as e:
         logger.error(f"Error in customs test endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/customs/optimization/status")
+async def get_customs_optimization_status():
+    """
+    Get status of customs calculation optimization features
+
+    Returns information about CAPTCHA caching, background solving, and performance metrics
+    """
+    try:
+        return customs_service.get_optimization_status()
+    except Exception as e:
+        logger.error(f"Error getting optimization status: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/customs/optimization/cache")
+async def get_customs_cache_stats():
+    """
+    Get detailed CAPTCHA cache statistics
+
+    Returns cache hit rates, token counts, and performance metrics
+    """
+    try:
+        return {
+            "success": True,
+            "cache_stats": customs_service.get_cache_stats(),
+            "note": "CAPTCHA tokens are cached for up to 10 minutes or 5 uses each",
+        }
+    except Exception as e:
+        logger.error(f"Error getting cache stats: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
