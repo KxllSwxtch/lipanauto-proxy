@@ -12,6 +12,7 @@ from schemas.bike_filters import (
     FilterInfo,
     FilterSearchParams,
     BikeSearchFilters,
+    FilterValues,
 )
 from parsers.bike_filters_parser import BikeFiltersParser
 
@@ -315,9 +316,13 @@ class BikeFiltersService:
                 available_manufacturers
             )
 
+            # Get filter values from HTML page
+            filter_values = await self.get_filter_values()
+
             return FilterInfo(
                 categories=available_categories,
                 manufacturers=available_manufacturers,
+                filter_values=filter_values,
                 popular_filters={
                     "popular_categories": popular_categories,
                     "popular_manufacturers": popular_manufacturers,
@@ -359,6 +364,10 @@ class BikeFiltersService:
                 if field_value is not None:
                     if field_name == "level_no2" and isinstance(field_value, list):
                         # Handle multi-select parameters
+                        for value in field_value:
+                            params[f"{field_name}[]"] = value
+                    elif field_name == "chk_point" and isinstance(field_value, list):
+                        # Handle checkbox array parameters
                         for value in field_value:
                             params[f"{field_name}[]"] = value
                     else:
@@ -422,6 +431,43 @@ class BikeFiltersService:
                 {"name": "600cc 이상", "cc": "600"},
             ],
         }
+
+    async def get_filter_values(self):
+        """
+        Get available values for all filter types by parsing the HTML form page
+        """
+        try:
+            # Check cache first
+            cache_key = "filter_values_html"
+            if cache_key in self._cache:
+                logger.info("Returning cached filter values")
+                return self._cache[cache_key]
+
+            # Fetch the bike listing page to get filter form
+            filter_page_url = "https://www.bobaedream.co.kr/bike2/bike_list.php?ifnew=N"
+
+            logger.info(f"Fetching filter values from: {filter_page_url}")
+
+            response = await self.proxy_client.make_request(filter_page_url)
+
+            if not response.get("success"):
+                logger.error(f"Failed to fetch filter page: {response.get('error')}")
+                return FilterValues()
+
+            html_content = response.get("text", "")
+
+            # Parse filter values from HTML
+            filter_values = self.parser.parse_filter_values_from_html(html_content)
+
+            # Cache the results
+            self._cache[cache_key] = filter_values
+
+            logger.info("Successfully fetched and cached filter values")
+            return filter_values
+
+        except Exception as e:
+            logger.error(f"Error getting filter values: {str(e)}")
+            return FilterValues()
 
     def clear_cache(self):
         """Clear filter cache"""

@@ -685,6 +685,40 @@ async def get_filter_suggestions():
     return bike_service.get_filter_suggestions()
 
 
+@app.get("/api/bikes/filters/values")
+async def get_filter_values():
+    """
+    Get available values for all filter types
+
+    Returns all available options for:
+    - Fuel types (연료)
+    - Transmission types (기어)
+    - Colors (색상)
+    - Selling methods (판매방법)
+    - Provinces (지역)
+    - Engine sizes (배기량)
+    - Price ranges (가격)
+    - Mileage ranges (주행거리)
+    - Year ranges (연식)
+
+    This endpoint parses the HTML form to extract all available filter values.
+    """
+    try:
+        result = await bike_service.filters_service.get_filter_values()
+        return {
+            "success": True,
+            "filter_values": result,
+            "meta": {
+                "service": "bike_filters_service",
+                "data_source": "html_form_parsing",
+                "note": "Values extracted from bobaedream.co.kr filter form",
+            },
+        }
+    except Exception as e:
+        logger.error(f"Error getting filter values: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @app.post("/api/bikes/search", response_model=BikeSearchResponse)
 async def search_bikes_with_filters(filters: BikeSearchFilters):
     """
@@ -776,6 +810,7 @@ async def root():
                 "/api/bikes/filters/manufacturers",
                 "/api/bikes/filters/models/{manufacturer_id}",
                 "/api/bikes/filters/submodels/{manufacturer_id}/{model_id}",
+                "/api/bikes/filters/values",
                 "/api/bikes/filters/models/{manufacturer_id}/validation",
                 "/api/bikes/filters/status",
                 "/api/bikes/filters/suggestions",
