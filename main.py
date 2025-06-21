@@ -19,6 +19,10 @@ from schemas.bike_filters import (
 )
 from services.bike_service import BikeService
 
+# Customs calculator imports
+from schemas.customs import CustomsCalculationRequest, CustomsCalculationResponse
+from services.customs_service import CustomsCalculatorService
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -300,8 +304,9 @@ class EncarProxyClient:
 # Глобальный клиент
 proxy_client = EncarProxyClient()
 
-# Initialize bike service
+# Initialize services
 bike_service = BikeService(proxy_client)
+customs_service = CustomsCalculatorService(proxy_client)
 
 
 @app.on_event("shutdown")
@@ -789,7 +794,9 @@ async def health_check():
         "services": {
             "encar_api": "✅ Active (cars)",
             "bobaedream_bikes": "✅ Active (motorcycles)",
+            "tks_customs": "✅ Active (customs calculator)",
             "parser_engine": "BeautifulSoup4 + lxml",
+            "captcha_solver": "CapSolver API integration",
         },
     }
 
@@ -816,6 +823,11 @@ async def root():
                 "/api/bikes/filters/suggestions",
                 "/api/bikes/search",
             ],
+            "customs": [
+                "/api/customs/calculate",
+                "/api/customs/balance",
+                "/api/customs/test",
+            ],
             "system": ["/health"],
         },
         "features": [
@@ -834,6 +846,7 @@ async def root():
         "platforms": {
             "encar.com": "Car listings and navigation",
             "bobaedream.co.kr": "Motorcycle listings and details",
+            "tks.ru": "Russian customs duty calculator",
         },
         "providers": [config["provider"] for config in PROXY_CONFIGS],
         "total_proxies": len(PROXY_CONFIGS),
@@ -842,6 +855,7 @@ async def root():
             "bikes_filters": "✅ COMPLETELY FIXED (100% success rate)",
             "bikes_submodels": "✅ NEW FEATURE (depth-3 filtering)",
             "cars_core": "✅ Fully operational",
+            "customs_calculator": "✅ NEW FEATURE (TKS.ru + CapSolver integration)",
         },
     }
 
@@ -1010,6 +1024,109 @@ async def validate_manufacturer_models(
                 "fallback_message": "Фильтрация по моделям временно недоступна",
             },
         }
+
+
+@app.post("/api/customs/calculate", response_model=CustomsCalculationResponse)
+async def calculate_customs_duties(request: CustomsCalculationRequest):
+    """
+    Calculate customs duties for vehicle import to Russia
+
+    Uses TKS.ru calculator with automatic CAPTCHA solving via CapSolver.
+
+    **Parameters:**
+    - **cost**: Vehicle cost in original currency (KRW, USD, EUR)
+    - **volume**: Engine displacement in cm³
+    - **power**: Engine power in horsepower or kilowatts
+    - **age**: Vehicle age in years
+    - **currency**: Currency code (410=KRW, 840=USD, 978=EUR)
+    - **engine_type**: Engine type (petrol, diesel, electric, hybrid)
+    - **face**: Entity type (jur=legal entity, fiz=individual)
+
+    **Example for Korean motorcycle:**
+    ```json
+    {
+        "cost": 1000000,
+        "volume": 355,
+        "power": 1,
+        "age": 3,
+        "currency": 410
+    }
+    ```
+
+    **Returns:**
+    - Detailed breakdown of all customs payments
+    - Exchange rates used in calculation
+    - Total amounts in RUB and USD
+    """
+    try:
+        logger.info(
+            f"Customs calculation request: {request.cost} ({request.currency}), {request.volume}cc, {request.age}y"
+        )
+
+        result = await customs_service.calculate_customs_duties(request)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502, detail=f"Customs calculation failed: {result.error}"
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in customs calculation endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/customs/balance")
+async def get_capsolver_balance():
+    """
+    Get CapSolver account balance
+
+    Returns current balance for CAPTCHA solving service
+    """
+    try:
+        balance_info = await customs_service.get_balance()
+        return balance_info
+
+    except Exception as e:
+        logger.error(f"Error getting CapSolver balance: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/customs/test")
+async def test_customs_calculation():
+    """
+    Test customs calculation with sample data
+
+    Uses sample motorcycle data to test the integration
+    """
+    try:
+        # Sample data for Korean motorcycle (similar to your curl example)
+        test_request = CustomsCalculationRequest(
+            cost=1000000,  # 1,000,000 KRW
+            volume=355,  # 355cc engine
+            power=1,  # 1 HP
+            age=3,  # 3 years old
+            currency=410,  # KRW
+            engine_type="petrol",
+            face="jur",  # Legal entity
+        )
+
+        result = await customs_service.calculate_customs_duties(test_request)
+
+        return {
+            "test_successful": result.success,
+            "sample_request": test_request.model_dump(),
+            "result": result.model_dump() if result.success else None,
+            "error": result.error if not result.success else None,
+            "note": "This is a test calculation using sample motorcycle data",
+        }
+
+    except Exception as e:
+        logger.error(f"Error in customs test endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 if __name__ == "__main__":
