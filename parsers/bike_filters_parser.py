@@ -28,10 +28,10 @@ class BikeFiltersParser:
         self, response_text: str, filter_level: int
     ) -> FilterLevel:
         """
-        Parse JavaScript filter response
+        Parse filter response (JSON or HTML)
 
         Args:
-            response_text: JavaScript response text
+            response_text: Response text (JSON array or HTML)
             filter_level: Filter level depth
 
         Returns:
@@ -47,37 +47,55 @@ class BikeFiltersParser:
                     meta={"error": "Empty response"},
                 )
 
-            # Clean and extract data from JavaScript response
-            clean_text = self._clean_js_response(response_text)
+            # Fix Korean encoding first
+            response_text = self._fix_korean_encoding(response_text)
 
-            if not clean_text:
-                logger.warning(
-                    f"No valid data found in response for level {filter_level}"
+            # Try to parse as JSON first (most common case)
+            options = self._parse_json_response(response_text)
+
+            if options:
+                logger.info(
+                    f"Parsed {len(options)} options from JSON for filter level {filter_level}"
                 )
                 return FilterLevel(
-                    success=False,
-                    options=[],
+                    success=True,
+                    options=options,
                     level=filter_level,
-                    meta={"error": "No valid data in response"},
+                    meta={
+                        "parser": "bike_filters_parser",
+                        "response_length": len(response_text),
+                        "options_count": len(options),
+                        "data_type": "json",
+                    },
                 )
 
-            # Parse options from cleaned text
-            options = self._parse_filter_options(clean_text)
+            # Fallback to HTML parsing
+            clean_text = self._clean_js_response(response_text)
+            if clean_text:
+                options = self._parse_filter_options(clean_text)
 
-            logger.info(
-                f"Parsed {len(options)} options for filter level {filter_level}"
-            )
+                logger.info(
+                    f"Parsed {len(options)} options from HTML for filter level {filter_level}"
+                )
+                return FilterLevel(
+                    success=True,
+                    options=options,
+                    level=filter_level,
+                    meta={
+                        "parser": "bike_filters_parser",
+                        "response_length": len(response_text),
+                        "cleaned_length": len(clean_text),
+                        "options_count": len(options),
+                        "data_type": "html",
+                    },
+                )
 
+            logger.warning(f"No valid data found in response for level {filter_level}")
             return FilterLevel(
-                success=True,
-                options=options,
+                success=False,
+                options=[],
                 level=filter_level,
-                meta={
-                    "parser": "bike_filters_parser",
-                    "response_length": len(response_text),
-                    "cleaned_length": len(clean_text),
-                    "options_count": len(options),
-                },
+                meta={"error": "No valid data in response"},
             )
 
         except Exception as e:
@@ -90,6 +108,47 @@ class BikeFiltersParser:
                 level=filter_level,
                 meta={"error": str(e), "parser": "bike_filters_parser"},
             )
+
+    def _parse_json_response(self, response_text: str) -> List[FilterOption]:
+        """
+        Parse JSON response from filter API
+
+        Args:
+            response_text: JSON response text
+
+        Returns:
+            List of FilterOption objects
+        """
+        try:
+            # Clean up the response text
+            response_text = response_text.strip()
+
+            # Try to parse as JSON array
+            if response_text.startswith("[") and response_text.endswith("]"):
+                json_data = json.loads(response_text)
+                options = []
+
+                for item in json_data:
+                    if isinstance(item, dict):
+                        sno = str(item.get("sno", ""))
+                        cname = str(item.get("cname", ""))
+                        cnt = str(item.get("cnt", "0"))
+                        chk = str(item.get("chk", ""))
+
+                        # Skip empty or invalid entries
+                        if sno and cname and sno != cname:
+                            options.append(
+                                FilterOption(sno=sno, cname=cname, cnt=cnt, chk=chk)
+                            )
+
+                return options
+
+        except json.JSONDecodeError as e:
+            logger.debug(f"JSON parsing failed: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error parsing JSON response: {str(e)}")
+
+        return []
 
     def _clean_js_response(self, response_text: str) -> str:
         """Clean JavaScript response to extract data"""
@@ -303,45 +362,92 @@ class BikeFiltersParser:
             logger.error(f"Error parsing filter values from HTML: {str(e)}")
             return FilterValues()
 
-    def _fix_korean_encoding(self, html_content: str) -> str:
-        """Fix Korean encoding issues in HTML content"""
+    def _fix_korean_encoding(self, content: str) -> str:
+        """Fix Korean encoding issues in content (HTML or JSON)"""
         try:
-            # Try different encoding approaches for Korean text
-            if isinstance(html_content, str):
-                # Method 1: Try to detect and fix mojibake
-                for encoding in self.encoding_fallbacks:
-                    try:
-                        # Convert string to bytes and back with correct encoding
-                        text_bytes = html_content.encode("latin1")
-                        decoded = text_bytes.decode(encoding)
-                        # Test if HTML parsing works
-                        BeautifulSoup(decoded[:1000], "html.parser")
-                        logger.info(f"Successfully fixed encoding with: {encoding}")
-                        return decoded
-                    except (UnicodeDecodeError, UnicodeEncodeError):
-                        continue
+            if not isinstance(content, str):
+                return content
 
-                # Method 2: Use UnicodeDammit as fallback
+            # Check if content is JSON
+            is_json = content.strip().startswith("[") or content.strip().startswith("{")
+
+            # Method 1: Try to detect and fix mojibake for Korean text
+            for encoding in self.encoding_fallbacks:
                 try:
-                    from bs4.dammit import UnicodeDammit
+                    # Convert string to bytes and back with correct encoding
+                    text_bytes = content.encode("latin1")
+                    decoded = text_bytes.decode(encoding)
 
-                    text_bytes = html_content.encode("latin1")
-                    dammit = UnicodeDammit(text_bytes, self.encoding_fallbacks)
-                    if dammit.unicode_markup:
+                    # Test if the decoding worked by checking for Korean characters
+                    if is_json:
+                        # For JSON, try to parse it to validate
+                        try:
+                            json.loads(decoded)
+                            logger.info(
+                                f"Successfully fixed JSON encoding with: {encoding}"
+                            )
+                            return decoded
+                        except json.JSONDecodeError:
+                            continue
+                    else:
+                        # For HTML, test if parsing works
+                        BeautifulSoup(decoded[:1000], "html.parser")
                         logger.info(
-                            f"Fixed encoding with UnicodeDammit: {dammit.original_encoding}"
+                            f"Successfully fixed HTML encoding with: {encoding}"
                         )
-                        return dammit.unicode_markup
-                except Exception:
-                    pass
+                        return decoded
 
-            # If all else fails, return original text
-            logger.warning("Could not fix encoding, using original text")
-            return html_content
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    continue
+
+            # Method 2: Use UnicodeDammit as fallback
+            try:
+                from bs4.dammit import UnicodeDammit
+
+                text_bytes = content.encode("latin1")
+                dammit = UnicodeDammit(text_bytes, self.encoding_fallbacks)
+                if dammit.unicode_markup:
+                    logger.info(
+                        f"Fixed encoding with UnicodeDammit: {dammit.original_encoding}"
+                    )
+                    return dammit.unicode_markup
+            except Exception:
+                pass
+
+            # Method 3: Try direct encoding fixes for common Korean mojibake patterns
+            try:
+                # Common Korean mojibake patterns
+                mojibake_fixes = {
+                    "ë": "대",  # 대림
+                    "ë¦¼": "림",
+                    "í": "혼",  # 혼다
+                    "ë¤": "다",
+                    "ì¼": "야",  # 야마하
+                    "ë§": "마",
+                    "í": "하",
+                    "ì¤": "스",  # 스즈키
+                    "ì¦": "즈",
+                    "í": "키",
+                }
+
+                fixed_content = content
+                for mojibake, correct in mojibake_fixes.items():
+                    fixed_content = fixed_content.replace(mojibake, correct)
+
+                if fixed_content != content:
+                    logger.info("Applied mojibake fixes for Korean text")
+                    return fixed_content
+
+            except Exception:
+                pass
+
+            # If all else fails, return original content
+            logger.debug("Could not fix encoding, using original content")
+            return content
 
         except Exception as e:
             logger.error(f"Encoding fix failed: {str(e)}")
-            return html_content
+            return content
 
     def _parse_select_options(self, select_element) -> List[FilterOption]:
         """Parse options from a select element"""
