@@ -590,8 +590,25 @@ class CustomsCalculatorService:
                 )
 
             logger.info("Using direct connection for TKS.ru POST request")
+
+            # CRITICAL: Initialize session with calculator page first (to get cookies)
+            try:
+                logger.info("Initializing session with calculator page...")
+                init_response = self.session.get(url, timeout=10)
+                if init_response.status_code == 200:
+                    logger.info(
+                        f"✅ Session initialized with cookies: {len(self.session.cookies)} cookies"
+                    )
+                else:
+                    logger.warning(
+                        f"⚠️ Session init failed: {init_response.status_code}"
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ Session initialization error: {str(e)}")
+
             try:
                 # Enhanced timeout and error handling for cloud environments
+                # Try to override target="_blank" behavior by making it look like AJAX
                 response = self.session.post(
                     url,
                     data=form_data,
@@ -605,12 +622,18 @@ class CustomsCalculatorService:
                         "Accept-Encoding": "gzip, deflate, br",
                         "Connection": "keep-alive",
                         "Upgrade-Insecure-Requests": "1",
+                        # Override target="_blank" behavior - treat as same window
                         "Sec-Fetch-Dest": "document",
                         "Sec-Fetch-Mode": "navigate",
                         "Sec-Fetch-Site": "same-origin",
                         "Sec-Fetch-User": "?1",
+                        # Add session cookies to maintain context
+                        "Cache-Control": "no-cache",
+                        "Pragma": "no-cache",
                     },
                     timeout=(15, 45),
+                    # Ensure cookies are maintained across requests
+                    allow_redirects=True,
                 )  # Increased timeouts
                 logger.info(f"TKS.ru POST response: {response.status_code}")
 
@@ -702,6 +725,7 @@ class CustomsCalculatorService:
                         "response_preview": (
                             html_content[:500] if html_content else None
                         ),
+                        "full_response": html_content,  # Save full HTML for debugging
                         "response_size": len(html_content),
                         "captcha_solution_length": len(captcha_solution),
                     },
