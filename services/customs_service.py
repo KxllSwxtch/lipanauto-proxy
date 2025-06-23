@@ -70,6 +70,8 @@ class CustomsCalculatorService:
         # TKS.ru configuration
         self.tks_base_url = "https://www.tks.ru"
         self.tks_calculator_url = f"{self.tks_base_url}/auto/calc/"
+        # URL for CAPTCHA solving (without trailing slash for better compatibility)
+        self.tks_captcha_url = f"{self.tks_base_url}/auto/calc"
 
         # reCAPTCHA configuration for TKS.ru
         self.recaptcha_site_key = (
@@ -192,6 +194,13 @@ class CustomsCalculatorService:
                 logger.info(
                     f"🧹 Cleaned {before_count - after_count} expired CAPTCHA tokens"
                 )
+
+    def clear_captcha_cache(self):
+        """Clear all cached CAPTCHA tokens (useful after URL changes)"""
+        with self.cache_lock:
+            token_count = len(self.captcha_cache)
+            self.captcha_cache.clear()
+            logger.info(f"🗑️ Cleared {token_count} cached CAPTCHA tokens")
 
     def _get_cached_captcha_token(self) -> Optional[str]:
         """Get a cached CAPTCHA token if available"""
@@ -383,7 +392,7 @@ class CustomsCalculatorService:
                 "clientKey": self.capsolver_api_key,
                 "task": {
                     "type": "ReCaptchaV2TaskProxyLess",
-                    "websiteURL": self.tks_calculator_url,
+                    "websiteURL": self.tks_captcha_url,  # Use URL without trailing slash
                     "websiteKey": site_key,
                 },
             }
@@ -541,12 +550,17 @@ class CustomsCalculatorService:
                     headers={
                         "Content-Type": "application/x-www-form-urlencoded",
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                        "Referer": url,
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.5",
+                        "Referer": "https://www.tks.ru/auto/calc/",  # Proper referer
+                        "Origin": "https://www.tks.ru",  # Add origin header
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+                        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",  # Russian locale
                         "Accept-Encoding": "gzip, deflate, br",
                         "Connection": "keep-alive",
                         "Upgrade-Insecure-Requests": "1",
+                        "Sec-Fetch-Dest": "document",
+                        "Sec-Fetch-Mode": "navigate",
+                        "Sec-Fetch-Site": "same-origin",
+                        "Sec-Fetch-User": "?1",
                     },
                     timeout=(15, 45),
                 )  # Increased timeouts
