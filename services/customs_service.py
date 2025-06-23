@@ -487,8 +487,8 @@ class CustomsCalculatorService:
         try:
             logger.info("Making calculation request to TKS.ru")
 
-            # Prepare request parameters
-            params = {
+            # Prepare request data for POST request
+            form_data = {
                 "cost": request.cost,
                 "volume": request.volume,
                 "currency": request.currency,
@@ -508,89 +508,101 @@ class CustomsCalculatorService:
                 "sequential": "true" if request.sequential else "false",
                 "mode": "ajax",
                 "t": "1",
-                "captcha": captcha_solution,
+                "g-recaptcha-response": captcha_solution,  # CAPTCHA token goes here
             }
 
             # Add optional parameters
             if request.mass:
-                params["mass"] = request.mass
+                form_data["mass"] = request.mass
             if request.boat_sea:
-                params["boat_sea"] = request.boat_sea
+                form_data["boat_sea"] = request.boat_sea
             if request.sh2017:
-                params["sh2017"] = request.sh2017
+                form_data["sh2017"] = request.sh2017
             if request.bus_municipal_cb:
-                params["bus_municipal_cb"] = request.bus_municipal_cb
+                form_data["bus_municipal_cb"] = request.bus_municipal_cb
 
-            # Build URL
-            url = f"{self.tks_calculator_url}?{urlencode(params)}"
-            logger.info(f"TKS.ru URL: {url[:100]}...")
+            # TKS.ru calculator URL (base URL without parameters)
+            url = self.tks_calculator_url.rstrip("?")
+            logger.info(f"TKS.ru POST URL: {url}")
+            logger.info(f"Form data keys: {list(form_data.keys())}")
 
-            # Make request with improved error handling for cloud environments
+            # Make POST request with form data
             if self.proxy_client:
-                logger.info("Using proxy client for TKS.ru request")
-                response_data = await self.proxy_client.make_request(url)
-                if not response_data.get("success"):
-                    error_msg = response_data.get("error", "Unknown proxy error")
-                    logger.error(f"Proxy request failed: {error_msg}")
+                logger.info(
+                    "❌ Proxy client doesn't support POST - using direct connection"
+                )
+
+            logger.info("Using direct connection for TKS.ru POST request")
+            try:
+                # Enhanced timeout and error handling for cloud environments
+                response = self.session.post(
+                    url,
+                    data=form_data,
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                        "Referer": url,
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                        "Accept-Language": "en-US,en;q=0.5",
+                        "Accept-Encoding": "gzip, deflate, br",
+                        "Connection": "keep-alive",
+                        "Upgrade-Insecure-Requests": "1",
+                    },
+                    timeout=(15, 45),
+                )  # Increased timeouts
+                logger.info(f"TKS.ru POST response: {response.status_code}")
+
+                if response.status_code != 200:
+                    logger.error(
+                        f"TKS.ru returned HTTP {response.status_code}: {response.text[:200]}"
+                    )
                     return CustomsCalculationResponse(
                         success=False,
-                        error=f"TKS.ru request failed via proxy: {error_msg}",
+                        error=f"TKS.ru returned HTTP {response.status_code}",
                         meta={
                             "step": "tks_request",
-                            "url": url[:100] + "...",
-                            "proxy_error": True,
-                            "proxy_response": response_data,
+                            "url": url,
+                            "http_status": response.status_code,
+                            "response_preview": response.text[:200],
+                            "request_method": "POST",
                         },
                     )
-                html_content = response_data.get("text", "")
-                logger.info(f"Received HTML response: {len(html_content)} bytes")
-            else:
-                logger.info("Using direct connection for TKS.ru request")
-                try:
-                    # Enhanced timeout and error handling for cloud environments
-                    response = self.session.get(
-                        url, timeout=(15, 45)
-                    )  # Increased timeouts
-                    logger.info(f"TKS.ru response: {response.status_code}")
+                html_content = response.text
+                logger.info(f"Received POST HTML response: {len(html_content)} bytes")
 
-                    if response.status_code != 200:
-                        logger.error(
-                            f"TKS.ru returned HTTP {response.status_code}: {response.text[:200]}"
-                        )
-                        return CustomsCalculationResponse(
-                            success=False,
-                            error=f"TKS.ru returned HTTP {response.status_code}",
-                            meta={
-                                "step": "tks_request",
-                                "url": url[:100] + "...",
-                                "http_status": response.status_code,
-                                "response_preview": response.text[:200],
-                            },
-                        )
-                    html_content = response.text
-                    logger.info(f"Received HTML response: {len(html_content)} bytes")
-
-                except requests.exceptions.Timeout as e:
-                    logger.error(f"TKS.ru request timeout: {str(e)}")
-                    return CustomsCalculationResponse(
-                        success=False,
-                        error=f"TKS.ru request timeout: {str(e)}",
-                        meta={"step": "tks_request", "timeout": True},
-                    )
-                except requests.exceptions.ConnectionError as e:
-                    logger.error(f"TKS.ru connection error: {str(e)}")
-                    return CustomsCalculationResponse(
-                        success=False,
-                        error=f"TKS.ru connection error: {str(e)}",
-                        meta={"step": "tks_request", "connection_error": True},
-                    )
-                except requests.exceptions.RequestException as e:
-                    logger.error(f"TKS.ru request error: {str(e)}")
-                    return CustomsCalculationResponse(
-                        success=False,
-                        error=f"TKS.ru request error: {str(e)}",
-                        meta={"step": "tks_request", "request_exception": True},
-                    )
+            except requests.exceptions.Timeout as e:
+                logger.error(f"TKS.ru POST request timeout: {str(e)}")
+                return CustomsCalculationResponse(
+                    success=False,
+                    error=f"TKS.ru request timeout: {str(e)}",
+                    meta={
+                        "step": "tks_request",
+                        "timeout": True,
+                        "request_method": "POST",
+                    },
+                )
+            except requests.exceptions.ConnectionError as e:
+                logger.error(f"TKS.ru POST connection error: {str(e)}")
+                return CustomsCalculationResponse(
+                    success=False,
+                    error=f"TKS.ru connection error: {str(e)}",
+                    meta={
+                        "step": "tks_request",
+                        "connection_error": True,
+                        "request_method": "POST",
+                    },
+                )
+            except requests.exceptions.RequestException as e:
+                logger.error(f"TKS.ru POST request error: {str(e)}")
+                return CustomsCalculationResponse(
+                    success=False,
+                    error=f"TKS.ru request error: {str(e)}",
+                    meta={
+                        "step": "tks_request",
+                        "request_exception": True,
+                        "request_method": "POST",
+                    },
+                )
 
             # Validate HTML content
             if not html_content or len(html_content) < 100:
