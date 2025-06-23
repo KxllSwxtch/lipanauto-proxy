@@ -150,6 +150,7 @@ class CustomsCalculatorService:
                         asyncio.set_event_loop(loop)
 
                         try:
+                            # Use v2 for background solving (default for TKS.ru)
                             solution = loop.run_until_complete(
                                 self._solve_captcha_internal(self.recaptcha_site_key)
                             )
@@ -263,9 +264,20 @@ class CustomsCalculatorService:
                         },
                     )
 
-                # Step 3: Solve new CAPTCHA
+                # Step 3: Solve new CAPTCHA with fallback system
                 logger.info(f"Solving CAPTCHA with site key: {site_key[:20]}...")
                 captcha_response = await self._solve_captcha_internal(site_key)
+
+                # If v2 failed with specific errors, no fallback needed since v2 is correct
+                if (
+                    not captcha_response.success
+                    and "wrong captcha type" in captcha_response.error.lower()
+                ):
+                    logger.warning(
+                        "reCAPTCHA v2 failed with wrong type - this should not happen for TKS.ru"
+                    )
+                    # v2 is the correct type for TKS.ru, so we won't retry with v3
+
                 if not captcha_response.success:
                     logger.error(f"CAPTCHA solving failed: {captcha_response.error}")
                     return CustomsCalculationResponse(
@@ -277,6 +289,7 @@ class CustomsCalculatorService:
                             "task_id": getattr(captcha_response, "task_id", None),
                             "optimization": "cache_miss",
                             "capsolver_balance_check": "Check /api/customs/balance",
+                            "attempted_fallback": "v3 -> v2",
                         },
                     )
 
@@ -373,13 +386,16 @@ class CustomsCalculatorService:
         # Return cached site key immediately (we know it doesn't change)
         return self.recaptcha_site_key
 
-    async def _solve_captcha_internal(self, site_key: str) -> CaptchaSolutionResponse:
+    async def _solve_captcha_internal(
+        self, site_key: str, retry_with_v2: bool = False
+    ) -> CaptchaSolutionResponse:
         """
         Internal method to solve reCAPTCHA using CapSolver API
         Used by both foreground and background solving
 
         Args:
             site_key: reCAPTCHA site key
+            retry_with_v2: If True, use v2 instead of v3
 
         Returns:
             CaptchaSolutionResponse with solution or error
@@ -387,17 +403,29 @@ class CustomsCalculatorService:
         try:
             start_time = time.time()
 
-            # Create task - TKS.ru uses hybrid v2/v3 system, try v3 first
-            task_data = {
-                "clientKey": self.capsolver_api_key,
-                "task": {
-                    "type": "ReCaptchaV3TaskProxyLess",  # Try v3 first for TKS.ru
-                    "websiteURL": self.tks_captcha_url,  # Use URL without trailing slash
-                    "websiteKey": site_key,
-                    "pageAction": "calculate",  # Common action for calculation forms
-                    "minScore": 0.7,  # Required score for v3
-                },
-            }
+            # Create task - TKS.ru uses hybrid v2/v3 system
+            if retry_with_v2:
+                # Fallback to v2 if v3 failed
+                task_data = {
+                    "clientKey": self.capsolver_api_key,
+                    "task": {
+                        "type": "ReCaptchaV2TaskProxyLess",
+                        "websiteURL": self.tks_captcha_url,
+                        "websiteKey": site_key,
+                    },
+                }
+                logger.info("Using reCAPTCHA v2 fallback...")
+            else:
+                # Use v2 as default - TKS.ru form expects v2 interaction
+                task_data = {
+                    "clientKey": self.capsolver_api_key,
+                    "task": {
+                        "type": "ReCaptchaV2TaskProxyLess",
+                        "websiteURL": self.tks_captcha_url,
+                        "websiteKey": site_key,
+                    },
+                }
+                logger.info("Using reCAPTCHA v2 (default for TKS.ru form)...")
 
             # Submit task
             create_response = requests.post(
