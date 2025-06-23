@@ -105,21 +105,42 @@ class TKSCustomsParser:
     def _is_valid_calculation_response(self, soup: BeautifulSoup) -> bool:
         """Check if HTML contains valid calculation results"""
         try:
-            # Look for the results table
+            # TKS.ru shows results in <div id="auto_res_div"> via AJAX
+            results_div = soup.find("div", id="auto_res_div")
+            if results_div and results_div.get_text(strip=True):
+                return True
+
+            # Fallback: Look for the results table (old method)
             table = soup.find("table", class_="autocalc_res")
-            if not table:
-                return False
+            if table:
+                # Check for required payment rows
+                payment_rows = table.find_all("tr")
+                if (
+                    len(payment_rows) >= 5
+                ):  # Should have at least customs, duty, excise, VAT, total
+                    return True
 
-            # Check for required payment rows
-            payment_rows = table.find_all("tr")
-            if (
-                len(payment_rows) < 5
-            ):  # Should have at least customs, duty, excise, VAT, total
-                return False
+            # Alternative: Look for calculation results in any form
+            # Check for typical calculation keywords
+            text_content = soup.get_text().lower()
+            calculation_indicators = [
+                "таможенное оформление",
+                "пошлина",
+                "итого к доплате",
+                "утилизационный сбор",
+                "результат расчета",
+            ]
 
-            # Look for "Итого" (Total) text
-            total_text = soup.find(string=re.compile(r"Итого"))
-            return bool(total_text)
+            found_indicators = sum(
+                1 for indicator in calculation_indicators if indicator in text_content
+            )
+            if found_indicators >= 3:  # Need at least 3 indicators
+                logger.info(
+                    f"Found {found_indicators} calculation indicators in response"
+                )
+                return True
+
+            return False
 
         except Exception as e:
             logger.warning(f"Error validating TKS response: {str(e)}")

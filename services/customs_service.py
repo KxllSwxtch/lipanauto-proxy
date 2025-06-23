@@ -563,8 +563,9 @@ class CustomsCalculatorService:
                 "xface": request.face,
                 "xboat_sea": request.boat_sea or "",
                 "xsh2017": "true" if request.sh2017 else "false",
-                "xcaptcha": "",  # This might be needed empty
-                # reCAPTCHA response
+                # CRITICAL: TKS.ru uses BOTH g-recaptcha-response AND xcaptcha fields!
+                "xcaptcha": captcha_solution,  # Same token as g-recaptcha-response
+                # reCAPTCHA response (both fields needed)
                 "g-recaptcha-response": captcha_solution,
             }
 
