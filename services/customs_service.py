@@ -387,13 +387,15 @@ class CustomsCalculatorService:
         try:
             start_time = time.time()
 
-            # Create task
+            # Create task - TKS.ru uses hybrid v2/v3 system, try v3 first
             task_data = {
                 "clientKey": self.capsolver_api_key,
                 "task": {
-                    "type": "ReCaptchaV2TaskProxyLess",
+                    "type": "ReCaptchaV3TaskProxyLess",  # Try v3 first for TKS.ru
                     "websiteURL": self.tks_captcha_url,  # Use URL without trailing slash
                     "websiteKey": site_key,
+                    "pageAction": "calculate",  # Common action for calculation forms
+                    "minScore": 0.7,  # Required score for v3
                 },
             }
 
