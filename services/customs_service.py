@@ -526,28 +526,46 @@ class CustomsCalculatorService:
         try:
             logger.info("Making calculation request to TKS.ru")
 
-            # Prepare request data for POST request
+            # Prepare request data for POST request - match TKS.ru form exactly
             form_data = {
+                # Main calculation parameters
                 "cost": request.cost,
                 "volume": request.volume,
                 "currency": request.currency,
                 "power": request.power,
                 "power_edizm": request.power_edizm,
-                "country": request.country,
                 "engine_type": request.engine_type,
                 "age": request.age,
                 "face": request.face,
-                "ts_type": request.ts_type,
                 "chassis": request.chassis,
-                "forwarder": "true" if request.forwarder else "false",
-                "caravan": "true" if request.caravan else "false",
-                "offroad": "true" if request.offroad else "false",
                 "buscap": request.buscap,
-                "mdvs_gt_m30ed": "true" if request.mdvs_gt_m30ed else "false",
-                "sequential": "true" if request.sequential else "false",
-                "mode": "ajax",
-                "t": "1",
-                "g-recaptcha-response": captcha_solution,  # CAPTCHA token goes here
+                "ts_type": request.ts_type,
+                # Boolean parameters (checkboxes)
+                "mdvs_gt_m30ed": "mdvs_gt_m30ed" if request.mdvs_gt_m30ed else "",
+                "sequential": "sequential" if request.sequential else "",
+                "forwarder": "forwarder" if request.forwarder else "",
+                "caravan": "caravan" if request.caravan else "",
+                "offroad": "offroad" if request.offroad else "",
+                # CRITICAL: Use correct mode as found in form
+                "mode": "calc",  # NOT "ajax" - this was the issue!
+                # Hidden fields from TKS.ru form (required for validation)
+                "xchassis": request.chassis,
+                "xforwarder": "true" if request.forwarder else "false",
+                "xcaravan": "true" if request.caravan else "false",
+                "xoffroad": "true" if request.offroad else "false",
+                "xbuscap": request.buscap,
+                "xpower_edizm": request.power_edizm,
+                "xcountry": request.country,
+                "xengine_type": request.engine_type,
+                "xmdvs_gt_m30ed": "true" if request.mdvs_gt_m30ed else "false",
+                "xsequential": "true" if request.sequential else "false",
+                "xage": str(request.age),
+                "xface": request.face,
+                "xboat_sea": request.boat_sea or "",
+                "xsh2017": "true" if request.sh2017 else "false",
+                "xcaptcha": "",  # This might be needed empty
+                # reCAPTCHA response
+                "g-recaptcha-response": captcha_solution,
             }
 
             # Add optional parameters
