@@ -828,6 +828,7 @@ async def root():
                 "/api/customs/calculate",
                 "/api/customs/balance",
                 "/api/customs/test",
+                "/api/customs/test-production",
                 "/api/customs/optimization/status",
                 "/api/customs/optimization/cache",
             ],
@@ -1132,6 +1133,105 @@ async def test_customs_calculation():
     except Exception as e:
         logger.error(f"Error in customs test endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/customs/test-production")
+async def test_customs_calculation_production():
+    """
+    Production-specific test for TKS.ru integration with enhanced diagnostics
+
+    This endpoint provides detailed diagnostics for cloud deployment issues
+    """
+    try:
+        import platform
+        import sys
+        import os
+
+        # Environment diagnostics
+        env_info = {
+            "platform": platform.platform(),
+            "python_version": sys.version,
+            "working_directory": os.getcwd(),
+            "environment_vars": {
+                "PORT": os.getenv("PORT"),
+                "RENDER": os.getenv("RENDER"),
+                "PYTHON_VERSION": os.getenv("PYTHON_VERSION"),
+                "NODE_VERSION": os.getenv("NODE_VERSION"),
+            },
+            "network_info": {
+                "hostname": platform.node(),
+                "architecture": platform.architecture(),
+            },
+        }
+
+        # Service status
+        service_info = {
+            "capsolver_api_key_configured": bool(customs_service.capsolver_api_key),
+            "tks_base_url": customs_service.tks_base_url,
+            "recaptcha_site_key": (
+                customs_service.recaptcha_site_key[:20] + "..."
+                if customs_service.recaptcha_site_key
+                else None
+            ),
+            "background_solver_running": customs_service.background_task_running,
+            "cache_stats": customs_service.get_cache_stats(),
+        }
+
+        # Test CapSolver balance first
+        logger.info("🔍 Testing CapSolver balance...")
+        balance_result = await customs_service.get_balance()
+
+        if not balance_result.get("success"):
+            return {
+                "test_successful": False,
+                "step_failed": "capsolver_balance",
+                "error": f"CapSolver balance check failed: {balance_result.get('error')}",
+                "env_info": env_info,
+                "service_info": service_info,
+                "recommendation": "Check CapSolver API key and network connectivity",
+            }
+
+        logger.info(f"✅ CapSolver balance: ${balance_result.get('balance')}")
+
+        # Test simple request
+        logger.info("🔍 Testing TKS.ru calculation...")
+        test_request = CustomsCalculationRequest(
+            cost=950000,  # Same as failing request in logs
+            volume=125,  # Same as failing request in logs
+            power=1,
+            age=17,  # Same as failing request in logs
+            currency=410,  # KRW
+            engine_type="petrol",
+            face="jur",
+        )
+
+        result = await customs_service.calculate_customs_duties(test_request)
+
+        return {
+            "test_successful": result.success,
+            "step_completed": (
+                "full_calculation"
+                if result.success
+                else result.meta.get("step", "unknown")
+            ),
+            "sample_request": test_request.model_dump(),
+            "result": result.model_dump() if result.success else None,
+            "error": result.error if not result.success else None,
+            "env_info": env_info,
+            "service_info": service_info,
+            "capsolver_balance": balance_result,
+            "note": "Production diagnostics test with same parameters as failing request",
+        }
+
+    except Exception as e:
+        logger.error(f"Error in production test endpoint: {str(e)}", exc_info=True)
+        return {
+            "test_successful": False,
+            "step_failed": "exception",
+            "error": f"Exception: {str(e)}",
+            "exception_type": type(e).__name__,
+            "note": "Production diagnostics test failed with exception",
+        }
 
 
 @app.get("/api/customs/optimization/status")

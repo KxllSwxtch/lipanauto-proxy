@@ -233,37 +233,51 @@ class CustomsCalculatorService:
 
             if captcha_solution:
                 logger.info("⚡ Using cached CAPTCHA token - FAST PATH")
+                # Update cache stats
+                self.stats["cache_hits"] += 1
             else:
                 logger.info("🐌 No cached token available - solving new CAPTCHA")
+                # Update cache stats
+                self.stats["cache_misses"] += 1
 
                 # Step 2: Get site key (usually cached)
                 site_key = await self._get_recaptcha_site_key()
                 if not site_key:
+                    logger.error("Failed to get reCAPTCHA site key")
                     return CustomsCalculationResponse(
                         success=False,
                         error="Failed to extract reCAPTCHA site key from TKS.ru",
                         meta={
                             "step": "site_key_extraction",
                             "optimization": "cache_miss",
+                            "site_key_configured": bool(self.recaptcha_site_key),
                         },
                     )
 
                 # Step 3: Solve new CAPTCHA
+                logger.info(f"Solving CAPTCHA with site key: {site_key[:20]}...")
                 captcha_response = await self._solve_captcha_internal(site_key)
                 if not captcha_response.success:
+                    logger.error(f"CAPTCHA solving failed: {captcha_response.error}")
                     return CustomsCalculationResponse(
                         success=False,
                         error=f"CAPTCHA solving failed: {captcha_response.error}",
                         meta={
                             "step": "captcha_solving",
                             "captcha_error": captcha_response.error,
+                            "task_id": getattr(captcha_response, "task_id", None),
                             "optimization": "cache_miss",
+                            "capsolver_balance_check": "Check /api/customs/balance",
                         },
                     )
 
                 captcha_solution = captcha_response.solution
+                logger.info(
+                    f"✅ CAPTCHA solved successfully: {len(captcha_solution)} chars"
+                )
 
             # Step 4: Make calculation request to TKS.ru
+            logger.info("Starting TKS.ru calculation request...")
             calculation_result = await self._make_calculation_request(
                 request, captcha_solution
             )
@@ -275,24 +289,68 @@ class CustomsCalculatorService:
             ) / 2
 
             if calculation_result.success:
+                logger.info(f"✅ Customs calculation completed in {response_time:.1f}s")
                 calculation_result.meta["optimization"] = {
                     "response_time": f"{response_time:.1f}s",
-                    "cache_hit": (
-                        captcha_solution != captcha_response.solution
-                        if "captcha_response" in locals()
-                        else True
+                    "cache_hit": captcha_solution
+                    != getattr(
+                        locals().get("captcha_response", object()), "solution", None
                     ),
                     "cache_stats": self.get_cache_stats(),
                 }
+            else:
+                logger.error(
+                    f"❌ Customs calculation failed: {calculation_result.error}"
+                )
+                # Add debug info to error response
+                if not calculation_result.meta:
+                    calculation_result.meta = {}
+                calculation_result.meta.update(
+                    {
+                        "optimization": {
+                            "response_time": f"{response_time:.1f}s",
+                            "cache_hit": captcha_solution
+                            != getattr(
+                                locals().get("captcha_response", object()),
+                                "solution",
+                                None,
+                            ),
+                            "cache_stats": self.get_cache_stats(),
+                        },
+                        "debug_info": {
+                            "captcha_solution_length": (
+                                len(captcha_solution) if captcha_solution else 0
+                            ),
+                            "request_params": {
+                                "cost": request.cost,
+                                "volume": request.volume,
+                                "currency": request.currency,
+                                "age": request.age,
+                            },
+                        },
+                    }
+                )
 
             return calculation_result
 
         except Exception as e:
-            logger.error(f"OPTIMIZED customs calculation failed: {str(e)}")
+            response_time = time.time() - start_time
+            logger.error(
+                f"OPTIMIZED customs calculation failed with exception: {str(e)}",
+                exc_info=True,
+            )
             return CustomsCalculationResponse(
                 success=False,
                 error=f"Calculation failed: {str(e)}",
-                meta={"step": "general_error", "optimization": "error"},
+                meta={
+                    "step": "general_error",
+                    "optimization": {
+                        "response_time": f"{response_time:.1f}s",
+                        "cache_stats": self.get_cache_stats(),
+                    },
+                    "exception_type": type(e).__name__,
+                    "exception_details": str(e),
+                },
             )
 
     async def _get_recaptcha_site_key(self) -> Optional[str]:
@@ -465,63 +523,142 @@ class CustomsCalculatorService:
 
             # Build URL
             url = f"{self.tks_calculator_url}?{urlencode(params)}"
+            logger.info(f"TKS.ru URL: {url[:100]}...")
 
-            # Make request
+            # Make request with improved error handling for cloud environments
             if self.proxy_client:
+                logger.info("Using proxy client for TKS.ru request")
                 response_data = await self.proxy_client.make_request(url)
                 if not response_data.get("success"):
+                    error_msg = response_data.get("error", "Unknown proxy error")
+                    logger.error(f"Proxy request failed: {error_msg}")
                     return CustomsCalculationResponse(
                         success=False,
-                        error=f"TKS.ru request failed: {response_data.get('error')}",
-                        meta={"step": "tks_request", "url": url},
+                        error=f"TKS.ru request failed via proxy: {error_msg}",
+                        meta={
+                            "step": "tks_request",
+                            "url": url[:100] + "...",
+                            "proxy_error": True,
+                            "proxy_response": response_data,
+                        },
                     )
                 html_content = response_data.get("text", "")
+                logger.info(f"Received HTML response: {len(html_content)} bytes")
             else:
-                response = self.session.get(url)
-                if response.status_code != 200:
+                logger.info("Using direct connection for TKS.ru request")
+                try:
+                    # Enhanced timeout and error handling for cloud environments
+                    response = self.session.get(
+                        url, timeout=(15, 45)
+                    )  # Increased timeouts
+                    logger.info(f"TKS.ru response: {response.status_code}")
+
+                    if response.status_code != 200:
+                        logger.error(
+                            f"TKS.ru returned HTTP {response.status_code}: {response.text[:200]}"
+                        )
+                        return CustomsCalculationResponse(
+                            success=False,
+                            error=f"TKS.ru returned HTTP {response.status_code}",
+                            meta={
+                                "step": "tks_request",
+                                "url": url[:100] + "...",
+                                "http_status": response.status_code,
+                                "response_preview": response.text[:200],
+                            },
+                        )
+                    html_content = response.text
+                    logger.info(f"Received HTML response: {len(html_content)} bytes")
+
+                except requests.exceptions.Timeout as e:
+                    logger.error(f"TKS.ru request timeout: {str(e)}")
                     return CustomsCalculationResponse(
                         success=False,
-                        error=f"TKS.ru returned HTTP {response.status_code}",
-                        meta={"step": "tks_request", "url": url},
+                        error=f"TKS.ru request timeout: {str(e)}",
+                        meta={"step": "tks_request", "timeout": True},
                     )
-                html_content = response.text
+                except requests.exceptions.ConnectionError as e:
+                    logger.error(f"TKS.ru connection error: {str(e)}")
+                    return CustomsCalculationResponse(
+                        success=False,
+                        error=f"TKS.ru connection error: {str(e)}",
+                        meta={"step": "tks_request", "connection_error": True},
+                    )
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"TKS.ru request error: {str(e)}")
+                    return CustomsCalculationResponse(
+                        success=False,
+                        error=f"TKS.ru request error: {str(e)}",
+                        meta={"step": "tks_request", "request_exception": True},
+                    )
+
+            # Validate HTML content
+            if not html_content or len(html_content) < 100:
+                logger.error(
+                    f"Invalid HTML response: {len(html_content) if html_content else 0} bytes"
+                )
+                return CustomsCalculationResponse(
+                    success=False,
+                    error="Empty or invalid HTML response from TKS.ru",
+                    meta={
+                        "step": "response_validation",
+                        "content_length": len(html_content) if html_content else 0,
+                        "content_preview": html_content[:100] if html_content else None,
+                    },
+                )
 
             # Parse response
+            logger.info("Parsing TKS.ru response...")
             original_request_dict = request.model_dump()
             parse_result = self.parser.parse_customs_calculation(
                 html_content, original_request_dict
             )
 
             if not parse_result.get("success"):
+                parse_error = parse_result.get("error", "Unknown parse error")
+                logger.error(f"Parse failed: {parse_error}")
+                logger.error(f"HTML preview: {html_content[:300]}...")
+
                 return CustomsCalculationResponse(
                     success=False,
-                    error=f"Failed to parse TKS.ru response: {parse_result.get('error')}",
+                    error=f"Failed to parse TKS.ru response: {parse_error}",
                     meta={
                         "step": "response_parsing",
                         "parse_meta": parse_result.get("meta", {}),
                         "response_preview": (
                             html_content[:500] if html_content else None
                         ),
+                        "response_size": len(html_content),
+                        "captcha_solution_length": len(captcha_solution),
                     },
                 )
 
+            logger.info("✅ TKS.ru calculation successful")
             return CustomsCalculationResponse(
                 success=True,
                 result=parse_result["result"],
                 meta={
                     "step": "completed",
                     "parse_meta": parse_result.get("meta", {}),
-                    "request_url": url,
+                    "request_url": url[:100] + "...",
                     "captcha_used": True,
+                    "response_size": len(html_content),
                 },
             )
 
         except Exception as e:
-            logger.error(f"TKS.ru calculation request failed: {str(e)}")
+            logger.error(
+                f"TKS.ru calculation request failed with exception: {str(e)}",
+                exc_info=True,
+            )
             return CustomsCalculationResponse(
                 success=False,
                 error=f"Calculation request failed: {str(e)}",
-                meta={"step": "request_error"},
+                meta={
+                    "step": "request_error",
+                    "exception_type": type(e).__name__,
+                    "exception_details": str(e),
+                },
             )
 
     async def get_balance(self) -> Dict[str, Any]:
