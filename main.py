@@ -831,6 +831,8 @@ async def root():
                 "/api/customs/test-production",
                 "/api/customs/optimization/status",
                 "/api/customs/optimization/cache",
+                "/api/customs/clear-cache",
+                "/api/customs/debug-info",
             ],
             "system": ["/health"],
         },
@@ -1263,6 +1265,73 @@ async def get_customs_cache_stats():
         }
     except Exception as e:
         logger.error(f"Error getting cache stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/api/customs/clear-cache")
+async def clear_captcha_cache():
+    """
+    Manually clear CAPTCHA token cache
+
+    Use this endpoint if you're experiencing CAPTCHA errors to force cache refresh
+    """
+    try:
+        # Get current cache stats before clearing
+        before_stats = customs_service.get_cache_stats()
+
+        # Clear the cache
+        customs_service._invalidate_all_tokens()
+
+        # Get stats after clearing
+        after_stats = customs_service.get_cache_stats()
+
+        return {
+            "success": True,
+            "message": "CAPTCHA cache cleared successfully",
+            "before": before_stats,
+            "after": after_stats,
+            "note": "Background solver will automatically replenish the cache",
+        }
+
+    except Exception as e:
+        logger.error(f"Error clearing CAPTCHA cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/customs/debug-info")
+async def get_customs_debug_info():
+    """
+    Get debug information about customs calculator service
+
+    Returns detailed information about the service state, cache, and configuration
+    """
+    try:
+        return {
+            "success": True,
+            "service_state": {
+                "background_solver_running": customs_service.background_task_running,
+                "session_cookies": len(customs_service.session.cookies),
+                "cached_tokens": len(customs_service.captcha_cache),
+                "recaptcha_site_key": customs_service.recaptcha_site_key[:20] + "...",
+            },
+            "cache_configuration": {
+                "token_expiry_minutes": 5,
+                "max_uses_per_token": 3,
+                "min_cached_tokens": customs_service.min_cached_tokens,
+                "max_cached_tokens": customs_service.max_cached_tokens,
+            },
+            "cache_stats": customs_service.get_cache_stats(),
+            "session_headers": dict(customs_service.session.headers),
+            "recommendations": [
+                "If seeing CAPTCHA errors, use /api/customs/clear-cache to reset",
+                "Tokens expire after 5 minutes or 3 uses",
+                "Background solver maintains 2-5 tokens in cache",
+                "Each token is tied to session cookies",
+            ],
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting debug info: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

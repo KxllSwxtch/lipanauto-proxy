@@ -33,8 +33,8 @@ class CachedCaptchaToken:
     token: str
     created_at: datetime
     used_count: int = 0
-    max_uses: int = 5  # Maximum uses per token
-    expiry_minutes: int = 10  # Token expires after 10 minutes
+    max_uses: int = 3  # Reduced from 5 to 3 for cloud reliability
+    expiry_minutes: int = 5  # Reduced from 10 to 5 minutes for cloud reliability
 
     @property
     def is_expired(self) -> bool:
@@ -70,23 +70,23 @@ class CustomsCalculatorService:
         # TKS.ru configuration
         self.tks_base_url = "https://www.tks.ru"
         self.tks_calculator_url = f"{self.tks_base_url}/auto/calc/"
-        # URL for CAPTCHA solving (without trailing slash for better compatibility)
-        self.tks_captcha_url = f"{self.tks_base_url}/auto/calc"
 
         # reCAPTCHA configuration for TKS.ru
         self.recaptcha_site_key = (
             "6Lel2XIgAAAAAHk1OOPbgNBw7VGRt3Y_0YTXMfJZ"  # Extracted from TKS.ru page
         )
 
-        # Session for requests
+        # Session for requests with cookie persistence
         self.session = requests.Session()
+        # Enable cookie jar
+        self.session.cookies = requests.cookies.RequestsCookieJar()
         self._setup_session()
 
         # OPTIMIZATION: CAPTCHA token cache
         self.captcha_cache: List[CachedCaptchaToken] = []
         self.cache_lock = threading.Lock()
-        self.min_cached_tokens = 3  # Always keep 3 tokens ready
-        self.max_cached_tokens = 10  # Maximum tokens to cache
+        self.min_cached_tokens = 2  # Reduced from 3 to 2 for faster updates
+        self.max_cached_tokens = 5  # Reduced from 10 to 5 to keep tokens fresh
 
         # Background task for pre-solving CAPTCHA
         self.background_task_running = False
@@ -102,15 +102,36 @@ class CustomsCalculatorService:
 
     def _setup_session(self):
         """Setup session with proper headers and configuration"""
+        # First, visit the calculator page to get cookies
+        try:
+            logger.info("Initializing TKS.ru session with cookies...")
+            init_response = self.session.get(self.tks_calculator_url, timeout=10)
+            if init_response.status_code == 200:
+                logger.info(
+                    f"✅ TKS.ru session initialized, cookies: {len(self.session.cookies)}"
+                )
+            else:
+                logger.warning(
+                    f"⚠️ TKS.ru session init returned {init_response.status_code}"
+                )
+        except Exception as e:
+            logger.warning(f"Failed to initialize TKS.ru session: {str(e)}")
+
+        # Update headers
         self.session.headers.update(
             {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept": "*/*",
                 "Accept-Language": "en,ru;q=0.9,en-CA;q=0.8,la;q=0.7,fr;q=0.6,ko;q=0.5",
                 "Accept-Encoding": "gzip, deflate, br",
                 "DNT": "1",
                 "Connection": "keep-alive",
                 "Upgrade-Insecure-Requests": "1",
+                "sec-ch-ua": '"Google Chrome";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"macOS"',
+                "Referer": "https://www.tks.ru/auto/calc/",
+                "X-Requested-With": "XMLHttpRequest",
             }
         )
 
@@ -150,7 +171,6 @@ class CustomsCalculatorService:
                         asyncio.set_event_loop(loop)
 
                         try:
-                            # Use v2 for background solving (default for TKS.ru)
                             solution = loop.run_until_complete(
                                 self._solve_captcha_internal(self.recaptcha_site_key)
                             )
@@ -196,12 +216,14 @@ class CustomsCalculatorService:
                     f"🧹 Cleaned {before_count - after_count} expired CAPTCHA tokens"
                 )
 
-    def clear_captcha_cache(self):
-        """Clear all cached CAPTCHA tokens (useful after URL changes)"""
+    def _invalidate_all_tokens(self):
+        """Invalidate all cached tokens (used when CAPTCHA error detected)"""
         with self.cache_lock:
-            token_count = len(self.captcha_cache)
-            self.captcha_cache.clear()
-            logger.info(f"🗑️ Cleared {token_count} cached CAPTCHA tokens")
+            count = len(self.captcha_cache)
+            self.captcha_cache = []
+            logger.warning(
+                f"🗑️ Invalidated ALL {count} cached CAPTCHA tokens due to error"
+            )
 
     def _get_cached_captcha_token(self) -> Optional[str]:
         """Get a cached CAPTCHA token if available"""
@@ -264,20 +286,9 @@ class CustomsCalculatorService:
                         },
                     )
 
-                # Step 3: Solve new CAPTCHA with fallback system
+                # Step 3: Solve new CAPTCHA
                 logger.info(f"Solving CAPTCHA with site key: {site_key[:20]}...")
                 captcha_response = await self._solve_captcha_internal(site_key)
-
-                # If v2 failed with specific errors, no fallback needed since v2 is correct
-                if (
-                    not captcha_response.success
-                    and "wrong captcha type" in captcha_response.error.lower()
-                ):
-                    logger.warning(
-                        "reCAPTCHA v2 failed with wrong type - this should not happen for TKS.ru"
-                    )
-                    # v2 is the correct type for TKS.ru, so we won't retry with v3
-
                 if not captcha_response.success:
                     logger.error(f"CAPTCHA solving failed: {captcha_response.error}")
                     return CustomsCalculationResponse(
@@ -289,7 +300,6 @@ class CustomsCalculatorService:
                             "task_id": getattr(captcha_response, "task_id", None),
                             "optimization": "cache_miss",
                             "capsolver_balance_check": "Check /api/customs/balance",
-                            "attempted_fallback": "v3 -> v2",
                         },
                     )
 
@@ -386,16 +396,13 @@ class CustomsCalculatorService:
         # Return cached site key immediately (we know it doesn't change)
         return self.recaptcha_site_key
 
-    async def _solve_captcha_internal(
-        self, site_key: str, retry_with_v2: bool = False
-    ) -> CaptchaSolutionResponse:
+    async def _solve_captcha_internal(self, site_key: str) -> CaptchaSolutionResponse:
         """
         Internal method to solve reCAPTCHA using CapSolver API
         Used by both foreground and background solving
 
         Args:
             site_key: reCAPTCHA site key
-            retry_with_v2: If True, use v2 instead of v3
 
         Returns:
             CaptchaSolutionResponse with solution or error
@@ -403,29 +410,15 @@ class CustomsCalculatorService:
         try:
             start_time = time.time()
 
-            # Create task - TKS.ru uses hybrid v2/v3 system
-            if retry_with_v2:
-                # Fallback to v2 if v3 failed
-                task_data = {
-                    "clientKey": self.capsolver_api_key,
-                    "task": {
-                        "type": "ReCaptchaV2TaskProxyLess",
-                        "websiteURL": self.tks_captcha_url,
-                        "websiteKey": site_key,
-                    },
-                }
-                logger.info("Using reCAPTCHA v2 fallback...")
-            else:
-                # Use v2 as default - TKS.ru form expects v2 interaction
-                task_data = {
-                    "clientKey": self.capsolver_api_key,
-                    "task": {
-                        "type": "ReCaptchaV2TaskProxyLess",
-                        "websiteURL": self.tks_captcha_url,
-                        "websiteKey": site_key,
-                    },
-                }
-                logger.info("Using reCAPTCHA v2 (default for TKS.ru form)...")
+            # Create task
+            task_data = {
+                "clientKey": self.capsolver_api_key,
+                "task": {
+                    "type": "ReCaptchaV2TaskProxyLess",
+                    "websiteURL": self.tks_calculator_url,
+                    "websiteKey": site_key,
+                },
+            }
 
             # Submit task
             create_response = requests.post(
@@ -526,169 +519,117 @@ class CustomsCalculatorService:
         try:
             logger.info("Making calculation request to TKS.ru")
 
-            # Prepare request data for POST request - match TKS.ru form exactly
-            form_data = {
-                # Main calculation parameters
+            # Prepare request parameters
+            params = {
                 "cost": request.cost,
                 "volume": request.volume,
                 "currency": request.currency,
                 "power": request.power,
                 "power_edizm": request.power_edizm,
+                "country": request.country,
                 "engine_type": request.engine_type,
                 "age": request.age,
                 "face": request.face,
-                "chassis": request.chassis,
-                "buscap": request.buscap,
                 "ts_type": request.ts_type,
-                # Boolean parameters (checkboxes)
-                "mdvs_gt_m30ed": "mdvs_gt_m30ed" if request.mdvs_gt_m30ed else "",
-                "sequential": "sequential" if request.sequential else "",
-                "forwarder": "forwarder" if request.forwarder else "",
-                "caravan": "caravan" if request.caravan else "",
-                "offroad": "offroad" if request.offroad else "",
-                # CRITICAL: Use correct mode as found in form
-                "mode": "calc",  # NOT "ajax" - this was the issue!
-                # Hidden fields from TKS.ru form (required for validation)
-                "xchassis": request.chassis,
-                "xforwarder": "true" if request.forwarder else "false",
-                "xcaravan": "true" if request.caravan else "false",
-                "xoffroad": "true" if request.offroad else "false",
-                "xbuscap": request.buscap,
-                "xpower_edizm": request.power_edizm,
-                "xcountry": request.country,
-                "xengine_type": request.engine_type,
-                "xmdvs_gt_m30ed": "true" if request.mdvs_gt_m30ed else "false",
-                "xsequential": "true" if request.sequential else "false",
-                "xage": str(request.age),
-                "xface": request.face,
-                "xboat_sea": request.boat_sea or "",
-                "xsh2017": "true" if request.sh2017 else "false",
-                # CRITICAL: TKS.ru uses BOTH g-recaptcha-response AND xcaptcha fields!
-                "xcaptcha": captcha_solution,  # Same token as g-recaptcha-response
-                # reCAPTCHA response (both fields needed)
-                "g-recaptcha-response": captcha_solution,
+                "chassis": request.chassis,
+                "forwarder": "true" if request.forwarder else "false",
+                "caravan": "true" if request.caravan else "false",
+                "offroad": "true" if request.offroad else "false",
+                "buscap": request.buscap,
+                "mdvs_gt_m30ed": "true" if request.mdvs_gt_m30ed else "false",
+                "sequential": "true" if request.sequential else "false",
+                "mode": "ajax",
+                "t": "1",
+                "captcha": captcha_solution,
             }
 
             # Add optional parameters
             if request.mass:
-                form_data["mass"] = request.mass
+                params["mass"] = request.mass
             if request.boat_sea:
-                form_data["boat_sea"] = request.boat_sea
+                params["boat_sea"] = request.boat_sea
             if request.sh2017:
-                form_data["sh2017"] = request.sh2017
+                params["sh2017"] = request.sh2017
             if request.bus_municipal_cb:
-                form_data["bus_municipal_cb"] = request.bus_municipal_cb
+                params["bus_municipal_cb"] = request.bus_municipal_cb
 
-            # TKS.ru calculator URL (base URL without parameters)
-            url = self.tks_calculator_url.rstrip("?")
-            logger.info(f"TKS.ru POST URL: {url}")
-            logger.info(f"Form data keys: {list(form_data.keys())}")
+            # Build URL
+            url = f"{self.tks_calculator_url}?{urlencode(params)}"
+            logger.info(f"TKS.ru URL: {url[:100]}...")
+            logger.info(
+                f"CAPTCHA token being used: {captcha_solution[:50]}...{captcha_solution[-20:] if len(captcha_solution) > 70 else ''}"
+            )
 
-            # Make POST request with form data
+            # Make request with improved error handling for cloud environments
             if self.proxy_client:
-                logger.info(
-                    "❌ Proxy client doesn't support POST - using direct connection"
-                )
-
-            logger.info("Using direct connection for TKS.ru POST request")
-
-            # CRITICAL: Initialize session with calculator page first (to get cookies)
-            try:
-                logger.info("Initializing session with calculator page...")
-                init_response = self.session.get(url, timeout=10)
-                if init_response.status_code == 200:
-                    logger.info(
-                        f"✅ Session initialized with cookies: {len(self.session.cookies)} cookies"
-                    )
-                else:
-                    logger.warning(
-                        f"⚠️ Session init failed: {init_response.status_code}"
-                    )
-            except Exception as e:
-                logger.warning(f"⚠️ Session initialization error: {str(e)}")
-
-            try:
-                # Enhanced timeout and error handling for cloud environments
-                # Try to override target="_blank" behavior by making it look like AJAX
-                response = self.session.post(
-                    url,
-                    data=form_data,
-                    headers={
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                        "Referer": "https://www.tks.ru/auto/calc/",  # Proper referer
-                        "Origin": "https://www.tks.ru",  # Add origin header
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-                        "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",  # Russian locale
-                        "Accept-Encoding": "gzip, deflate, br",
-                        "Connection": "keep-alive",
-                        "Upgrade-Insecure-Requests": "1",
-                        # Override target="_blank" behavior - treat as same window
-                        "Sec-Fetch-Dest": "document",
-                        "Sec-Fetch-Mode": "navigate",
-                        "Sec-Fetch-Site": "same-origin",
-                        "Sec-Fetch-User": "?1",
-                        # Add session cookies to maintain context
-                        "Cache-Control": "no-cache",
-                        "Pragma": "no-cache",
-                    },
-                    timeout=(15, 45),
-                    # Ensure cookies are maintained across requests
-                    allow_redirects=True,
-                )  # Increased timeouts
-                logger.info(f"TKS.ru POST response: {response.status_code}")
-
-                if response.status_code != 200:
-                    logger.error(
-                        f"TKS.ru returned HTTP {response.status_code}: {response.text[:200]}"
-                    )
+                logger.info("Using proxy client for TKS.ru request")
+                response_data = await self.proxy_client.make_request(url)
+                if not response_data.get("success"):
+                    error_msg = response_data.get("error", "Unknown proxy error")
+                    logger.error(f"Proxy request failed: {error_msg}")
                     return CustomsCalculationResponse(
                         success=False,
-                        error=f"TKS.ru returned HTTP {response.status_code}",
+                        error=f"TKS.ru request failed via proxy: {error_msg}",
                         meta={
                             "step": "tks_request",
-                            "url": url,
-                            "http_status": response.status_code,
-                            "response_preview": response.text[:200],
-                            "request_method": "POST",
+                            "url": url[:100] + "...",
+                            "proxy_error": True,
+                            "proxy_response": response_data,
                         },
                     )
-                html_content = response.text
-                logger.info(f"Received POST HTML response: {len(html_content)} bytes")
+                html_content = response_data.get("text", "")
+                logger.info(f"Received HTML response: {len(html_content)} bytes")
+            else:
+                logger.info("Using direct connection for TKS.ru request")
+                try:
+                    # Log cookies before request
+                    logger.info(f"Session cookies: {len(self.session.cookies)} items")
 
-            except requests.exceptions.Timeout as e:
-                logger.error(f"TKS.ru POST request timeout: {str(e)}")
-                return CustomsCalculationResponse(
-                    success=False,
-                    error=f"TKS.ru request timeout: {str(e)}",
-                    meta={
-                        "step": "tks_request",
-                        "timeout": True,
-                        "request_method": "POST",
-                    },
-                )
-            except requests.exceptions.ConnectionError as e:
-                logger.error(f"TKS.ru POST connection error: {str(e)}")
-                return CustomsCalculationResponse(
-                    success=False,
-                    error=f"TKS.ru connection error: {str(e)}",
-                    meta={
-                        "step": "tks_request",
-                        "connection_error": True,
-                        "request_method": "POST",
-                    },
-                )
-            except requests.exceptions.RequestException as e:
-                logger.error(f"TKS.ru POST request error: {str(e)}")
-                return CustomsCalculationResponse(
-                    success=False,
-                    error=f"TKS.ru request error: {str(e)}",
-                    meta={
-                        "step": "tks_request",
-                        "request_exception": True,
-                        "request_method": "POST",
-                    },
-                )
+                    # Enhanced timeout and error handling for cloud environments
+                    response = self.session.get(
+                        url, timeout=(15, 45)
+                    )  # Increased timeouts
+                    logger.info(f"TKS.ru response: {response.status_code}")
+                    logger.info(f"Response headers: {dict(response.headers)}")
+
+                    if response.status_code != 200:
+                        logger.error(
+                            f"TKS.ru returned HTTP {response.status_code}: {response.text[:200]}"
+                        )
+                        return CustomsCalculationResponse(
+                            success=False,
+                            error=f"TKS.ru returned HTTP {response.status_code}",
+                            meta={
+                                "step": "tks_request",
+                                "url": url[:100] + "...",
+                                "http_status": response.status_code,
+                                "response_preview": response.text[:200],
+                            },
+                        )
+                    html_content = response.text
+                    logger.info(f"Received HTML response: {len(html_content)} bytes")
+
+                except requests.exceptions.Timeout as e:
+                    logger.error(f"TKS.ru request timeout: {str(e)}")
+                    return CustomsCalculationResponse(
+                        success=False,
+                        error=f"TKS.ru request timeout: {str(e)}",
+                        meta={"step": "tks_request", "timeout": True},
+                    )
+                except requests.exceptions.ConnectionError as e:
+                    logger.error(f"TKS.ru connection error: {str(e)}")
+                    return CustomsCalculationResponse(
+                        success=False,
+                        error=f"TKS.ru connection error: {str(e)}",
+                        meta={"step": "tks_request", "connection_error": True},
+                    )
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"TKS.ru request error: {str(e)}")
+                    return CustomsCalculationResponse(
+                        success=False,
+                        error=f"TKS.ru request error: {str(e)}",
+                        meta={"step": "tks_request", "request_exception": True},
+                    )
 
             # Validate HTML content
             if not html_content or len(html_content) < 100:
@@ -702,6 +643,40 @@ class CustomsCalculatorService:
                         "step": "response_validation",
                         "content_length": len(html_content) if html_content else 0,
                         "content_preview": html_content[:100] if html_content else None,
+                    },
+                )
+
+            # Check for CAPTCHA error in response
+            if (
+                "На форму расчёта установлена CAPTCHA" in html_content
+                or "captcha" in html_content.lower()
+            ):
+                logger.error(
+                    "❌ CAPTCHA error detected in response - invalidating cache"
+                )
+
+                # Invalidate all cached tokens as they're likely expired
+                self._invalidate_all_tokens()
+
+                # Save HTML for debugging (only in development/debug mode)
+                if os.getenv("DEBUG", "").lower() == "true":
+                    with open("debug_captcha_error.html", "w", encoding="utf-8") as f:
+                        f.write(html_content)
+                    logger.info(
+                        "Saved CAPTCHA error response to debug_captcha_error.html"
+                    )
+
+                return CustomsCalculationResponse(
+                    success=False,
+                    error="CAPTCHA validation failed - tokens have been invalidated",
+                    meta={
+                        "step": "captcha_validation",
+                        "response_preview": (
+                            html_content[:300] if html_content else None
+                        ),
+                        "captcha_token_length": len(captcha_solution),
+                        "cache_invalidated": True,
+                        "recommendation": "Try again - new CAPTCHA will be solved",
                     },
                 )
 
@@ -726,7 +701,6 @@ class CustomsCalculatorService:
                         "response_preview": (
                             html_content[:500] if html_content else None
                         ),
-                        "full_response": html_content,  # Save full HTML for debugging
                         "response_size": len(html_content),
                         "captcha_solution_length": len(captcha_solution),
                     },
@@ -818,8 +792,8 @@ class CustomsCalculatorService:
             "cache_configuration": {
                 "min_cached_tokens": self.min_cached_tokens,
                 "max_cached_tokens": self.max_cached_tokens,
-                "token_expiry_minutes": 10,
-                "max_uses_per_token": 5,
+                "token_expiry_minutes": 5,
+                "max_uses_per_token": 3,
             },
             "performance_improvement": "Up to 90% faster (< 2s vs 17s)",
             "cache_stats": self.get_cache_stats(),
