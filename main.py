@@ -23,6 +23,18 @@ from services.bike_service import BikeService
 from schemas.customs import CustomsCalculationRequest, CustomsCalculationResponse
 from services.customs_service import CustomsCalculatorService
 
+# KBChaChaCha imports
+from schemas.kbchachacha import (
+    KBMakersResponse,
+    KBModelsResponse,
+    KBGenerationsResponse,
+    KBConfigsTrimsResponse,
+    KBSearchResponse,
+    KBDefaultListResponse,
+    KBSearchFilters,
+)
+from services.kbchachacha_service import KBChaChaService
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -308,6 +320,8 @@ proxy_client = EncarProxyClient()
 bike_service = BikeService(proxy_client)
 # Initialize customs service WITHOUT proxy for faster direct requests
 customs_service = CustomsCalculatorService(proxy_client=None)
+# Initialize KBChaChaCha service WITH proxy for Korean site access
+kbchachacha_service = KBChaChaService(proxy_client)
 
 
 @app.on_event("shutdown")
@@ -834,6 +848,14 @@ async def root():
                 "/api/customs/clear-cache",
                 "/api/customs/debug-info",
             ],
+            "kbchachacha": [
+                "/api/kbchachacha/manufacturers",
+                "/api/kbchachacha/models/{maker_code}",
+                "/api/kbchachacha/search",
+                "/api/kbchachacha/filters",
+                "/api/kbchachacha/default",
+                "/api/kbchachacha/test",
+            ],
             "system": ["/health"],
         },
         "features": [
@@ -854,6 +876,7 @@ async def root():
         "platforms": {
             "encar.com": "Car listings and navigation (via proxy)",
             "bobaedream.co.kr": "Motorcycle listings and details (via proxy)",
+            "kbchachacha.com": "Korean car marketplace - manufacturers, models, search (via proxy)",
             "tks.ru": "Russian customs duty calculator (direct connection)",
         },
         "providers": [config["provider"] for config in PROXY_CONFIGS],
@@ -863,7 +886,8 @@ async def root():
             "bikes_filters": "✅ COMPLETELY FIXED (100% success rate)",
             "bikes_submodels": "✅ NEW FEATURE (depth-3 filtering)",
             "cars_core": "✅ Fully operational",
-            "customs_calculator": "✅ NEW FEATURE (TKS.ru + CapSolver integration)",
+            "kbchachacha_cars": "✅ NEW FEATURE (Korean car marketplace integration)",
+            "customs_calculator": "✅ OPTIMIZED (TKS.ru + CapSolver integration)",
         },
     }
 
@@ -1332,6 +1356,482 @@ async def get_customs_debug_info():
 
     except Exception as e:
         logger.error(f"Error getting debug info: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ============================================================================
+# KBChaChaCha API Endpoints
+# ============================================================================
+
+
+@app.get("/api/kbchachacha/manufacturers", response_model=KBMakersResponse)
+async def get_kbchachacha_manufacturers():
+    """
+    Get list of car manufacturers from KBChaChaCha
+
+    Returns both domestic (국산) and imported (수입) manufacturers
+    with car counts for each manufacturer.
+
+    **Example Response:**
+    ```json
+    {
+        "success": true,
+        "domestic": [
+            {"makerName": "현대", "makerCode": "101", "count": 15234},
+            {"makerName": "기아", "makerCode": "102", "count": 12456}
+        ],
+        "imported": [
+            {"makerName": "벤츠", "makerCode": "108", "count": 8203},
+            {"makerName": "BMW", "makerCode": "107", "count": 8431}
+        ]
+    }
+    ```
+    """
+    try:
+        result = await kbchachacha_service.get_manufacturers()
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch manufacturers: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in KBChaChaCha manufacturers endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/kbchachacha/models/{maker_code}", response_model=KBModelsResponse)
+async def get_kbchachacha_models(maker_code: str):
+    """
+    Get car models for specific manufacturer
+
+    **Parameters:**
+    - **maker_code**: Manufacturer code (e.g., "101" for 현대, "102" for 기아)
+
+    **Returns:**
+    List of models with usage types (대형, SUV, 준중형, etc.)
+    """
+    try:
+        result = await kbchachacha_service.get_models(maker_code)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch models for maker {maker_code}: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in KBChaChaCha models endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/kbchachacha/search", response_model=KBSearchResponse)
+async def search_kbchachacha_cars(
+    page: int = Query(default=1, description="Page number"),
+    sort: str = Query(default="-orderDate", description="Sort order"),
+    makerCode: Optional[str] = Query(None, description="Manufacturer code"),
+    classCode: Optional[str] = Query(None, description="Model class code"),
+    carCode: Optional[str] = Query(None, description="Car code"),
+    modelCode: Optional[str] = Query(None, description="Model code"),
+    modelGradeCode: Optional[str] = Query(None, description="Model grade codes"),
+    # Year filter (연식)
+    year_from: Optional[int] = Query(
+        None, description="Minimum year (e.g., 2020)", ge=1990, le=2030
+    ),
+    year_to: Optional[int] = Query(
+        None, description="Maximum year (e.g., 2025)", ge=1990, le=2030
+    ),
+    # Mileage filter (주행거리) - in kilometers
+    mileage_from: Optional[int] = Query(
+        None, description="Minimum mileage in km", ge=0
+    ),
+    mileage_to: Optional[int] = Query(None, description="Maximum mileage in km", ge=0),
+    # Price filter (가격) - in 만원 (10,000 KRW units)
+    price_from: Optional[int] = Query(None, description="Minimum price in 만원", ge=0),
+    price_to: Optional[int] = Query(None, description="Maximum price in 만원", ge=0),
+    # Fuel types (연료) - comma-separated list
+    fuel_types: Optional[str] = Query(
+        None, description="Fuel types: gasoline,diesel,electric,hybrid_gasoline,lpg,etc"
+    ),
+):
+    """
+    Search cars on KBChaChaCha with comprehensive filters
+
+    **Basic Parameters:**
+    - **page**: Page number for pagination
+    - **sort**: Sort order (default: -orderDate)
+    - **makerCode**: Filter by manufacturer (e.g., "101" for 현대)
+    - **classCode**: Filter by model class (e.g., "1101" for 그랜저)
+
+    **Year Filter (연식):**
+    - **year_from**: Minimum year (e.g., 2020)
+    - **year_to**: Maximum year (e.g., 2025)
+
+    **Mileage Filter (주행거리):**
+    - **mileage_from**: Minimum mileage in km (e.g., 0)
+    - **mileage_to**: Maximum mileage in km (e.g., 50000)
+
+    **Price Filter (가격):**
+    - **price_from**: Minimum price in 만원 (e.g., 1000 for 1000만원)
+    - **price_to**: Maximum price in 만원 (e.g., 5000 for 5000만원)
+
+    **Fuel Types (연료):**
+    - **fuel_types**: Comma-separated list of fuel types:
+      - `gasoline` - 가솔린
+      - `diesel` - 디젤
+      - `electric` - 전기
+      - `hybrid_gasoline` - 하이브리드(가솔린)
+      - `hybrid_diesel` - 하이브리드(디젤)
+      - `lpg` - LPG
+      - `cng` - CNG
+
+    **Example Usage:**
+    - All cars: `/api/kbchachacha/search`
+    - 현대 cars 2020-2025: `/api/kbchachacha/search?makerCode=101&year_from=2020&year_to=2025`
+    - Electric cars under 3000만원: `/api/kbchachacha/search?fuel_types=electric&price_to=3000`
+    - Low mileage gasoline cars: `/api/kbchachacha/search?fuel_types=gasoline&mileage_to=30000`
+    """
+    try:
+        # Parse fuel types from string to enum list
+        parsed_fuel_types = None
+        if fuel_types:
+            fuel_type_mapping = {
+                "gasoline": "004001",  # 가솔린
+                "diesel": "004002",  # 디젤
+                "lpg": "004003",  # LPG
+                "hybrid_lpg": "004004",  # 하이브리드(LPG)
+                "hybrid_gasoline": "004005",  # 하이브리드(가솔린)
+                "hybrid_diesel": "004011",  # 하이브리드(디젤)
+                "cng": "004006",  # CNG
+                "electric": "004007",  # 전기
+                "other": "004008",  # 기타
+                "gasoline_lpg": "004010",  # 가솔린+LPG
+            }
+
+            fuel_list = [ft.strip().lower() for ft in fuel_types.split(",")]
+            from schemas.kbchachacha import FuelType
+
+            parsed_fuel_types = []
+
+            for fuel in fuel_list:
+                if fuel in fuel_type_mapping:
+                    parsed_fuel_types.append(FuelType(fuel_type_mapping[fuel]))
+
+        filters = KBSearchFilters(
+            page=page,
+            sort=sort,
+            makerCode=makerCode,
+            classCode=classCode,
+            carCode=carCode,
+            modelCode=modelCode,
+            modelGradeCode=modelGradeCode,
+            year_from=year_from,
+            year_to=year_to,
+            mileage_from=mileage_from,
+            mileage_to=mileage_to,
+            price_from=price_from,
+            price_to=price_to,
+            fuel_types=parsed_fuel_types,
+        )
+
+        result = await kbchachacha_service.search_cars(filters)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to search cars: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in KBChaChaCha search endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/kbchachacha/default", response_model=KBDefaultListResponse)
+async def get_kbchachacha_default_listings():
+    """
+    Get default car listings from KBChaChaCha homepage
+
+    Returns KB Star Pick cars and certified/diagnosed cars
+    from the main page without any filters.
+
+    **Returns:**
+    - **star_pick_listings**: KB Star Pick featured cars
+    - **certified_listings**: Certified and diagnosed cars
+    - **total_count**: Total number of listings
+    """
+    try:
+        result = await kbchachacha_service.get_default_listings()
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch default listings: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in KBChaChaCha default listings endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/kbchachacha/test")
+async def test_kbchachacha_integration():
+    """
+    Test KBChaChaCha integration with sample requests
+
+    Tests all major endpoints to verify functionality
+    """
+    try:
+        results = {}
+
+        # Test manufacturers
+        logger.info("Testing KBChaChaCha manufacturers...")
+        manufacturers_result = await kbchachacha_service.get_manufacturers()
+        results["manufacturers"] = {
+            "success": manufacturers_result.success,
+            "total_count": manufacturers_result.total_count,
+            "domestic_count": len(manufacturers_result.domestic),
+            "imported_count": len(manufacturers_result.imported),
+            "sample_domestic": (
+                manufacturers_result.domestic[:3]
+                if manufacturers_result.domestic
+                else []
+            ),
+            "sample_imported": (
+                manufacturers_result.imported[:3]
+                if manufacturers_result.imported
+                else []
+            ),
+        }
+
+        # Test models (using 현대 as example)
+        if manufacturers_result.success and manufacturers_result.domestic:
+            hyundai_code = "101"  # 현대
+            logger.info(
+                f"Testing KBChaChaCha models for 현대 (code: {hyundai_code})..."
+            )
+            models_result = await kbchachacha_service.get_models(hyundai_code)
+            results["models"] = {
+                "success": models_result.success,
+                "total_count": models_result.total_count,
+                "sample_models": (
+                    models_result.models[:5] if models_result.models else []
+                ),
+                "maker_code": hyundai_code,
+            }
+
+        # Test default listings
+        logger.info("Testing KBChaChaCha default listings...")
+        default_result = await kbchachacha_service.get_default_listings()
+        results["default_listings"] = {
+            "success": default_result.success,
+            "total_count": default_result.total_count,
+            "star_pick_count": len(default_result.star_pick_listings),
+            "certified_count": len(default_result.certified_listings),
+            "sample_listings": (
+                default_result.star_pick_listings + default_result.certified_listings
+            )[:3],
+        }
+
+        # Test search with filters (using 현대 as example)
+        if manufacturers_result.success and manufacturers_result.domestic:
+            hyundai_code = "101"  # 현대
+            logger.info(f"Testing KBChaChaCha filtered search for 현대...")
+
+            # Test comprehensive filters
+            from schemas.kbchachacha import KBSearchFilters, FuelType
+
+            test_filters = KBSearchFilters(
+                page=1,
+                makerCode=hyundai_code,
+                year_from=2020,
+                year_to=2025,
+                price_to=5000,  # Under 5000만원
+                mileage_to=50000,  # Under 50,000km
+                fuel_types=[FuelType.GASOLINE, FuelType.HYBRID_GASOLINE],
+            )
+
+            search_result = await kbchachacha_service.search_cars(test_filters)
+            results["filtered_search"] = {
+                "success": search_result.success,
+                "total_count": search_result.total_count,
+                "listings_count": len(search_result.listings),
+                "filters_applied": {
+                    "manufacturer": "현대",
+                    "year_range": "2020-2025",
+                    "max_price": "5000만원",
+                    "max_mileage": "50000km",
+                    "fuel_types": ["gasoline", "hybrid_gasoline"],
+                },
+                "sample_listings": (
+                    search_result.listings[:2] if search_result.listings else []
+                ),
+            }
+
+        return {
+            "test_successful": True,
+            "timestamp": time.time(),
+            "note": "KBChaChaCha integration test completed",
+            "results": results,
+        }
+
+    except Exception as e:
+        logger.error(f"Error in KBChaChaCha test endpoint: {str(e)}")
+        return {
+            "test_successful": False,
+            "error": str(e),
+            "timestamp": time.time(),
+            "note": "KBChaChaCha integration test failed",
+        }
+
+
+@app.get("/api/kbchachacha/filters")
+async def get_kbchachacha_filters():
+    """
+    Get information about available KBChaChaCha search filters
+
+    Returns comprehensive information about all available filter options
+    including fuel types, year ranges, price ranges, and usage examples.
+
+    **Returns:**
+    - **fuel_types**: All available fuel type options with codes
+    - **year_range**: Supported year range for filtering
+    - **price_info**: Information about price filtering (in 만원)
+    - **mileage_info**: Information about mileage filtering (in km)
+    - **usage_examples**: Example API calls with different filters
+    """
+    try:
+        from schemas.kbchachacha import FuelType
+
+        return {
+            "success": True,
+            "filters": {
+                "fuel_types": {
+                    "description": "Available fuel type filters",
+                    "options": {
+                        "gasoline": {
+                            "code": "004001",
+                            "name": "가솔린",
+                            "description": "Gasoline",
+                        },
+                        "diesel": {
+                            "code": "004002",
+                            "name": "디젤",
+                            "description": "Diesel",
+                        },
+                        "lpg": {"code": "004003", "name": "LPG", "description": "LPG"},
+                        "hybrid_lpg": {
+                            "code": "004004",
+                            "name": "하이브리드(LPG)",
+                            "description": "Hybrid LPG",
+                        },
+                        "hybrid_gasoline": {
+                            "code": "004005",
+                            "name": "하이브리드(가솔린)",
+                            "description": "Hybrid Gasoline",
+                        },
+                        "hybrid_diesel": {
+                            "code": "004011",
+                            "name": "하이브리드(디젤)",
+                            "description": "Hybrid Diesel",
+                        },
+                        "cng": {"code": "004006", "name": "CNG", "description": "CNG"},
+                        "electric": {
+                            "code": "004007",
+                            "name": "전기",
+                            "description": "Electric",
+                        },
+                        "other": {
+                            "code": "004008",
+                            "name": "기타",
+                            "description": "Other",
+                        },
+                        "gasoline_lpg": {
+                            "code": "004010",
+                            "name": "가솔린+LPG",
+                            "description": "Gasoline + LPG",
+                        },
+                    },
+                    "usage": "Comma-separated list: ?fuel_types=gasoline,electric,hybrid_gasoline",
+                },
+                "year_filter": {
+                    "description": "Year range filter (연식)",
+                    "range": {"min": 1990, "max": 2030},
+                    "parameters": ["year_from", "year_to"],
+                    "usage": "?year_from=2020&year_to=2025",
+                    "examples": {
+                        "recent_cars": "?year_from=2020",
+                        "2020_to_2025": "?year_from=2020&year_to=2025",
+                        "before_2015": "?year_to=2015",
+                    },
+                },
+                "price_filter": {
+                    "description": "Price range filter (가격) in 만원 (10,000 KRW units)",
+                    "unit": "만원 (10,000 KRW)",
+                    "range": {"min": 0, "max": 99999},
+                    "parameters": ["price_from", "price_to"],
+                    "usage": "?price_from=1000&price_to=5000",
+                    "examples": {
+                        "under_3000": "?price_to=3000",
+                        "1000_to_5000": "?price_from=1000&price_to=5000",
+                        "above_2000": "?price_from=2000",
+                    },
+                },
+                "mileage_filter": {
+                    "description": "Mileage range filter (주행거리) in kilometers",
+                    "unit": "km",
+                    "range": {"min": 0, "max": 999999},
+                    "parameters": ["mileage_from", "mileage_to"],
+                    "usage": "?mileage_from=0&mileage_to=50000",
+                    "examples": {
+                        "low_mileage": "?mileage_to=30000",
+                        "medium_mileage": "?mileage_from=30000&mileage_to=100000",
+                        "high_mileage": "?mileage_from=100000",
+                    },
+                },
+            },
+            "usage_examples": {
+                "basic_search": "/api/kbchachacha/search",
+                "manufacturer_filter": "/api/kbchachacha/search?makerCode=101",
+                "comprehensive_filter": "/api/kbchachacha/search?makerCode=101&year_from=2020&year_to=2025&price_to=3000&fuel_types=gasoline,hybrid_gasoline",
+                "electric_cars": "/api/kbchachacha/search?fuel_types=electric&price_to=5000",
+                "low_mileage_luxury": "/api/kbchachacha/search?mileage_to=20000&price_from=3000",
+                "recent_hybrids": "/api/kbchachacha/search?year_from=2022&fuel_types=hybrid_gasoline,hybrid_diesel",
+            },
+            "combining_filters": {
+                "note": "All filters can be combined for precise search results",
+                "examples": [
+                    "Recent electric cars under 4000만원: ?year_from=2021&fuel_types=electric&price_to=4000",
+                    "Low mileage 현대 cars 2020-2023: ?makerCode=101&year_from=2020&year_to=2023&mileage_to=30000",
+                    "Hybrid cars in mid price range: ?fuel_types=hybrid_gasoline,hybrid_diesel&price_from=2000&price_to=4000",
+                ],
+            },
+            "meta": {
+                "service": "kbchachacha_filters",
+                "supported_manufacturers": "Use /api/kbchachacha/manufacturers to get all available manufacturers",
+                "supported_models": "Use /api/kbchachacha/models/{maker_code} to get models for specific manufacturer",
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error in KBChaChaCha filters endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

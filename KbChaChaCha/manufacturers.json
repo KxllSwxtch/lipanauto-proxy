@@ -1,0 +1,597 @@
+{
+  "status": 200,
+  "message": "SUCCESS",
+  "messageDetail": "",
+  "params": {
+    "debugMode": false,
+    "pageSize": 10,
+    "page": 0,
+    "defaultFields": [],
+    "includeFields": [],
+    "excludeFields": [],
+    "sort": [],
+    "searchAfter": []
+  },
+  "result": {
+    "hits": [],
+    "total": 0,
+    "수입": [
+      {
+        "countryCode": "수입",
+        "makerOrder": 10,
+        "makerName": "벤츠",
+        "makerCode": "108",
+        "count": 8203
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 11,
+        "makerName": "BMW",
+        "makerCode": "107",
+        "count": 8431
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 12,
+        "makerName": "아우디",
+        "makerCode": "109",
+        "count": 2517
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 13,
+        "makerName": "폭스바겐",
+        "makerCode": "112",
+        "count": 1281
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 14,
+        "makerName": "렉서스",
+        "makerCode": "133",
+        "count": 698
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 15,
+        "makerName": "닛산",
+        "makerCode": "128",
+        "count": 283
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 16,
+        "makerName": "다이하쓰",
+        "makerCode": "129",
+        "count": 9
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 17,
+        "makerName": "닷지",
+        "makerCode": "130",
+        "count": 62
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 18,
+        "makerName": "도요타",
+        "makerCode": "124",
+        "count": 542
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 19,
+        "makerName": "동풍자동차",
+        "makerCode": "191",
+        "count": 28
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 20,
+        "makerName": "란치아",
+        "makerCode": "131",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 21,
+        "makerName": "람보르기니",
+        "makerCode": "132",
+        "count": 45
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 22,
+        "makerName": "랜드로버",
+        "makerCode": "116",
+        "count": 1497
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 23,
+        "makerName": "로버",
+        "makerCode": "134",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 24,
+        "makerName": "로터스",
+        "makerCode": "135",
+        "count": 3
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 25,
+        "makerName": "롤스로이스",
+        "makerCode": "119",
+        "count": 45
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 26,
+        "makerName": "르노",
+        "makerCode": "151",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 27,
+        "makerName": "링컨",
+        "makerCode": "136",
+        "count": 423
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 28,
+        "makerName": "마세라티",
+        "makerCode": "137",
+        "count": 418
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 29,
+        "makerName": "마쯔다",
+        "makerCode": "126",
+        "count": 5
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 30,
+        "makerName": "맥라렌",
+        "makerCode": "173",
+        "count": 21
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 31,
+        "makerName": "머큐리",
+        "makerCode": "155",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 32,
+        "makerName": "미니",
+        "makerCode": "160",
+        "count": 1647
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 33,
+        "makerName": "미쯔비시",
+        "makerCode": "125",
+        "count": 5
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 34,
+        "makerName": "미쯔오까",
+        "makerCode": "162",
+        "count": 1
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 35,
+        "makerName": "벤틀리",
+        "makerCode": "138",
+        "count": 152
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 36,
+        "makerName": "볼보",
+        "makerCode": "117",
+        "count": 838
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 37,
+        "makerName": "부가티",
+        "makerCode": "163",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 38,
+        "makerName": "뷰익",
+        "makerCode": "139",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 39,
+        "makerName": "사브",
+        "makerCode": "111",
+        "count": 9
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 40,
+        "makerName": "새턴",
+        "makerCode": "165",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 41,
+        "makerName": "선롱버스",
+        "makerCode": "181",
+        "count": 3
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 42,
+        "makerName": "쉐보레",
+        "makerCode": "142",
+        "count": 65
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 43,
+        "makerName": "스바루",
+        "makerCode": "140",
+        "count": 7
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 44,
+        "makerName": "스마트",
+        "makerCode": "166",
+        "count": 26
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 45,
+        "makerName": "스즈키",
+        "makerCode": "141",
+        "count": 22
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 46,
+        "makerName": "스카니아",
+        "makerCode": "169",
+        "count": 2
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 47,
+        "makerName": "스파이커",
+        "makerCode": "174",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 48,
+        "makerName": "시트로엥",
+        "makerCode": "118",
+        "count": 115
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 49,
+        "makerName": "DS",
+        "makerCode": "175",
+        "count": 6
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 50,
+        "makerName": "알파로메오",
+        "makerCode": "143",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 51,
+        "makerName": "애스턴마틴",
+        "makerCode": "156",
+        "count": 27
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 52,
+        "makerName": "어큐라",
+        "makerCode": "167",
+        "count": 1
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 53,
+        "makerName": "오펠",
+        "makerCode": "144",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 54,
+        "makerName": "올즈모빌",
+        "makerCode": "145",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 55,
+        "makerName": "이네오스",
+        "makerCode": "200",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 56,
+        "makerName": "이스즈",
+        "makerCode": "127",
+        "count": 20
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 57,
+        "makerName": "인피니티",
+        "makerCode": "153",
+        "count": 305
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 58,
+        "makerName": "재규어",
+        "makerCode": "115",
+        "count": 507
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 59,
+        "makerName": "중한자동차",
+        "makerCode": "180",
+        "count": 13
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 60,
+        "makerName": "지프",
+        "makerCode": "170",
+        "count": 973
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 61,
+        "makerName": "캐딜락",
+        "makerCode": "146",
+        "count": 318
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 62,
+        "makerName": "코닉세그",
+        "makerCode": "171",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 63,
+        "makerName": "크라이슬러",
+        "makerCode": "121",
+        "count": 121
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 65,
+        "makerName": "테슬라",
+        "makerCode": "190",
+        "count": 635
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 66,
+        "makerName": "파가니",
+        "makerCode": "172",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 67,
+        "makerName": "페라리",
+        "makerCode": "148",
+        "count": 63
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 68,
+        "makerName": "포드",
+        "makerCode": "122",
+        "count": 895
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 69,
+        "makerName": "포르쉐",
+        "makerCode": "114",
+        "count": 1227
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 70,
+        "makerName": "폰티악",
+        "makerCode": "149",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 71,
+        "makerName": "푸조",
+        "makerCode": "110",
+        "count": 424
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 72,
+        "makerName": "피아트",
+        "makerCode": "113",
+        "count": 72
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 73,
+        "makerName": "허머",
+        "makerCode": "150",
+        "count": 25
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 74,
+        "makerName": "혼다",
+        "makerCode": "123",
+        "count": 305
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 76,
+        "makerName": "GMC",
+        "makerCode": "152",
+        "count": 24
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 77,
+        "makerName": "포톤",
+        "makerCode": "192",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 78,
+        "makerName": "폴스타",
+        "makerCode": "158",
+        "count": 28
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 79,
+        "makerName": "마이바흐",
+        "makerCode": "161",
+        "count": 2
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 80,
+        "makerName": "사이언",
+        "makerCode": "164",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 81,
+        "makerName": "이베코",
+        "makerCode": "168",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 82,
+        "makerName": "팬더",
+        "makerCode": "147",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 83,
+        "makerName": "BYD",
+        "makerCode": "176",
+        "count": 1
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 85,
+        "makerName": "MAN",
+        "makerCode": "154",
+        "count": 8
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 86,
+        "makerName": "히노",
+        "makerCode": "157",
+        "count": 0
+      },
+      {
+        "countryCode": "수입",
+        "makerOrder": 87,
+        "makerName": "LEVC",
+        "makerCode": "198",
+        "count": 2
+      }
+    ],
+    "국산": [
+      {
+        "countryCode": "국산",
+        "makerOrder": 1,
+        "makerName": "현대",
+        "makerCode": "101",
+        "count": 53966
+      },
+      {
+        "countryCode": "국산",
+        "makerOrder": 2,
+        "makerName": "제네시스",
+        "makerCode": "189",
+        "count": 7621
+      },
+      {
+        "countryCode": "국산",
+        "makerOrder": 3,
+        "makerName": "기아",
+        "makerCode": "102",
+        "count": 46279
+      },
+      {
+        "countryCode": "국산",
+        "makerOrder": 4,
+        "makerName": "한국GM",
+        "makerCode": "103",
+        "count": 9972
+      },
+      {
+        "countryCode": "국산",
+        "makerOrder": 5,
+        "makerName": "르노코리아",
+        "makerCode": "105",
+        "count": 8616
+      },
+      {
+        "countryCode": "국산",
+        "makerOrder": 6,
+        "makerName": "KG모빌리티",
+        "makerCode": "104",
+        "count": 7663
+      },
+      {
+        "countryCode": "국산",
+        "makerOrder": 9,
+        "makerName": "기타",
+        "makerCode": "106",
+        "count": 175
+      }
+    ]
+  }
+}

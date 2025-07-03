@@ -1,0 +1,269 @@
+{
+  "status": 200,
+  "message": "SUCCESS",
+  "messageDetail": "",
+  "params": {
+    "debugMode": false,
+    "pageSize": 10,
+    "page": 0,
+    "defaultFields": [],
+    "includeFields": [],
+    "excludeFields": [],
+    "sort": [],
+    "searchAfter": []
+  },
+  "result": {
+    "hits": [],
+    "codeKey": {
+      "makerCode": "101",
+      "classCode": "1108",
+      "className": "쏘나타",
+      "makerName": "현대"
+    },
+    "total": 0,
+    "sale": {
+      "1121": 104,
+      "3332": 37,
+      "1120": 10,
+      "3331": 7,
+      "3330": 117,
+      "3021": 289,
+      "2504": 1199,
+      "1415": 158,
+      "1118": 7,
+      "1447": 353,
+      "2888": 70,
+      "1117": 3,
+      "1116": 3,
+      "2874": 641,
+      "2533": 139,
+      "2994": 1455,
+      "1123": 667,
+      "3147": 6,
+      "1122": 128,
+      "1119": 3
+    },
+    "code": [
+      {
+        "carOrder": 1,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타 디 엣지(DN8)",
+        "carCode": "3330",
+        "fromYear": "2023",
+        "toYear": "현재"
+      },
+      {
+        "carOrder": 2,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타 디 엣지 N Line(DN8)",
+        "carCode": "3331",
+        "fromYear": "2023",
+        "toYear": "현재"
+      },
+      {
+        "carOrder": 3,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타 디 엣지 하이브리드(DN8)",
+        "carCode": "3332",
+        "fromYear": "2023",
+        "toYear": "현재"
+      },
+      {
+        "carOrder": 4,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타 (DN8)",
+        "carCode": "2994",
+        "fromYear": "2019",
+        "toYear": "2023"
+      },
+      {
+        "carOrder": 5,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타 N Line",
+        "carCode": "3147",
+        "fromYear": "2020",
+        "toYear": "2023"
+      },
+      {
+        "carOrder": 6,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타 하이브리드 (DN8)",
+        "carCode": "3021",
+        "fromYear": "2019",
+        "toYear": "2023"
+      },
+      {
+        "carOrder": 7,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타 뉴 라이즈",
+        "carCode": "2874",
+        "fromYear": "2017",
+        "toYear": "2019"
+      },
+      {
+        "carOrder": 9,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타 뉴 라이즈 하이브리드",
+        "carCode": "2888",
+        "fromYear": "2017",
+        "toYear": "2019"
+      },
+      {
+        "carOrder": 11,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "LF쏘나타",
+        "carCode": "2504",
+        "fromYear": "2014",
+        "toYear": "2017"
+      },
+      {
+        "carOrder": 12,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "LF쏘나타 하이브리드",
+        "carCode": "2533",
+        "fromYear": "2014",
+        "toYear": "2017"
+      },
+      {
+        "carOrder": 14,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타 더 브릴리언트",
+        "carCode": "1447",
+        "fromYear": "2012",
+        "toYear": "2014"
+      },
+      {
+        "carOrder": 15,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타 하이브리드",
+        "carCode": "1415",
+        "fromYear": "2011",
+        "toYear": "2014"
+      },
+      {
+        "carOrder": 16,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "YF쏘나타",
+        "carCode": "1123",
+        "fromYear": "2009",
+        "toYear": "2012"
+      },
+      {
+        "carOrder": 17,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "NF쏘나타트랜스폼",
+        "carCode": "1122",
+        "fromYear": "2007",
+        "toYear": "2012"
+      },
+      {
+        "carOrder": 18,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "NF쏘나타",
+        "carCode": "1121",
+        "fromYear": "2004",
+        "toYear": "2007"
+      },
+      {
+        "carOrder": 19,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "뉴EF쏘나타",
+        "carCode": "1120",
+        "fromYear": "2001",
+        "toYear": "2006"
+      },
+      {
+        "carOrder": 20,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "EF쏘나타",
+        "carCode": "1119",
+        "fromYear": "1998",
+        "toYear": "2001"
+      },
+      {
+        "carOrder": 21,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타3",
+        "carCode": "1118",
+        "fromYear": "1996",
+        "toYear": "1998"
+      },
+      {
+        "carOrder": 22,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타2",
+        "carCode": "1117",
+        "fromYear": "1993",
+        "toYear": "1996"
+      },
+      {
+        "carOrder": 23,
+        "makerName": "현대",
+        "makerCode": "101",
+        "className": "쏘나타",
+        "classCode": "1108",
+        "carName": "쏘나타",
+        "carCode": "1116",
+        "fromYear": "1985",
+        "toYear": "1993"
+      }
+    ]
+  }
+}
