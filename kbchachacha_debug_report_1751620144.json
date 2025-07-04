@@ -1,0 +1,265 @@
+{
+  "summary": {
+    "total_tests": 6,
+    "successful_tests": 6,
+    "success_rate": 100.0,
+    "timestamp": "2025-07-04T14:09:04.191656"
+  },
+  "error_analysis": {},
+  "generation_analysis": {
+    "3301": {
+      "name": "그랜저 - 2.5 가솔린 2WD",
+      "expected_to_work": true,
+      "our_api_result": {
+        "step": "configs_trims",
+        "success": true,
+        "configs": 6,
+        "trims": 23
+      },
+      "direct_api_result": {
+        "success": true,
+        "status_code": 200,
+        "json_status": 200,
+        "code_model_count": 6,
+        "code_grade_count": 23,
+        "has_data": true
+      },
+      "diagnosis": {
+        "status": "✅ Полностью работает",
+        "data_availability": "✅ Данные доступны в источнике",
+        "recommendation": "✅ Все работает корректно",
+        "expectation": "✅ Соответствует ожиданиям"
+      }
+    },
+    "3308": {
+      "name": "포터 - 저상복합냉동탑차 초장축 슈퍼캡",
+      "expected_to_work": false,
+      "our_api_result": {
+        "step": "configs_trims",
+        "success": true,
+        "configs": 3,
+        "trims": 19
+      },
+      "direct_api_result": {
+        "success": true,
+        "status_code": 200,
+        "json_status": 200,
+        "code_model_count": 3,
+        "code_grade_count": 19,
+        "has_data": true
+      },
+      "diagnosis": {
+        "status": "✅ Полностью работает",
+        "data_availability": "✅ Данные доступны в источнике",
+        "recommendation": "✅ Все работает корректно",
+        "expectation": "⚠️ Работает, хотя не ожидалось"
+      }
+    },
+    "1142": {
+      "name": "BMW 5시리즈 - 520i",
+      "expected_to_work": false,
+      "our_api_result": {
+        "step": "configs_trims",
+        "success": true,
+        "configs": 7,
+        "trims": 25
+      },
+      "direct_api_result": {
+        "success": true,
+        "status_code": 200,
+        "json_status": 200,
+        "code_model_count": 7,
+        "code_grade_count": 25,
+        "has_data": true
+      },
+      "diagnosis": {
+        "status": "✅ Полностью работает",
+        "data_availability": "✅ Данные доступны в источнике",
+        "recommendation": "✅ Все работает корректно",
+        "expectation": "⚠️ Работает, хотя не ожидалось"
+      }
+    },
+    "1135": {
+      "name": "BMW 3시리즈 - 320d",
+      "expected_to_work": false,
+      "our_api_result": {
+        "step": "configs_trims",
+        "success": true,
+        "configs": 6,
+        "trims": 16
+      },
+      "direct_api_result": {
+        "success": true,
+        "status_code": 200,
+        "json_status": 200,
+        "code_model_count": 6,
+        "code_grade_count": 16,
+        "has_data": true
+      },
+      "diagnosis": {
+        "status": "✅ Полностью работает",
+        "data_availability": "✅ Данные доступны в источнике",
+        "recommendation": "✅ Все работает корректно",
+        "expectation": "⚠️ Работает, хотя не ожидалось"
+      }
+    },
+    "3330": {
+      "name": "쏘나타 디 엣지(DN8)",
+      "expected_to_work": true,
+      "our_api_result": {
+        "step": "configs_trims",
+        "success": true,
+        "configs": 6,
+        "trims": 13
+      },
+      "direct_api_result": {
+        "success": true,
+        "status_code": 200,
+        "json_status": 200,
+        "code_model_count": 6,
+        "code_grade_count": 13,
+        "has_data": true
+      },
+      "diagnosis": {
+        "status": "✅ Полностью работает",
+        "data_availability": "✅ Данные доступны в источнике",
+        "recommendation": "✅ Все работает корректно",
+        "expectation": "✅ Соответствует ожиданиям"
+      }
+    },
+    "3317": {
+      "name": "아반떼",
+      "expected_to_work": true,
+      "our_api_result": {
+        "step": "configs_trims",
+        "success": true,
+        "configs": 4,
+        "trims": 9
+      },
+      "direct_api_result": {
+        "success": true,
+        "status_code": 200,
+        "json_status": 200,
+        "code_model_count": 4,
+        "code_grade_count": 9,
+        "has_data": true
+      },
+      "diagnosis": {
+        "status": "✅ Полностью работает",
+        "data_availability": "✅ Данные доступны в источнике",
+        "recommendation": "✅ Все работает корректно",
+        "expectation": "✅ Соответствует ожиданиям"
+      }
+    }
+  },
+  "test_results": [
+    {
+      "test": "Configs-Trims Debug (그랜저 - 2.5 가솔린 2WD)",
+      "success": true,
+      "timestamp": "2025-07-04T14:08:46.856151",
+      "data_summary": {
+        "type": "dict",
+        "total_count": 29,
+        "configurations_count": 6,
+        "trims_count": 23,
+        "success": true
+      },
+      "error": null,
+      "details": {
+        "car_code": "3301",
+        "configs": 6,
+        "trims": 23
+      }
+    },
+    {
+      "test": "Configs-Trims Debug (포터 - 저상복합냉동탑차 초장축 슈퍼캡)",
+      "success": true,
+      "timestamp": "2025-07-04T14:08:50.381934",
+      "data_summary": {
+        "type": "dict",
+        "total_count": 22,
+        "configurations_count": 3,
+        "trims_count": 19,
+        "success": true
+      },
+      "error": null,
+      "details": {
+        "car_code": "3308",
+        "configs": 3,
+        "trims": 19
+      }
+    },
+    {
+      "test": "Configs-Trims Debug (BMW 5시리즈 - 520i)",
+      "success": true,
+      "timestamp": "2025-07-04T14:08:53.164627",
+      "data_summary": {
+        "type": "dict",
+        "total_count": 32,
+        "configurations_count": 7,
+        "trims_count": 25,
+        "success": true
+      },
+      "error": null,
+      "details": {
+        "car_code": "1142",
+        "configs": 7,
+        "trims": 25
+      }
+    },
+    {
+      "test": "Configs-Trims Debug (BMW 3시리즈 - 320d)",
+      "success": true,
+      "timestamp": "2025-07-04T14:08:55.981358",
+      "data_summary": {
+        "type": "dict",
+        "total_count": 22,
+        "configurations_count": 6,
+        "trims_count": 16,
+        "success": true
+      },
+      "error": null,
+      "details": {
+        "car_code": "1135",
+        "configs": 6,
+        "trims": 16
+      }
+    },
+    {
+      "test": "Configs-Trims Debug (쏘나타 디 엣지(DN8))",
+      "success": true,
+      "timestamp": "2025-07-04T14:08:59.993460",
+      "data_summary": {
+        "type": "dict",
+        "total_count": 19,
+        "configurations_count": 6,
+        "trims_count": 13,
+        "success": true
+      },
+      "error": null,
+      "details": {
+        "car_code": "3330",
+        "configs": 6,
+        "trims": 13
+      }
+    },
+    {
+      "test": "Configs-Trims Debug (아반떼)",
+      "success": true,
+      "timestamp": "2025-07-04T14:09:02.777990",
+      "data_summary": {
+        "type": "dict",
+        "total_count": 13,
+        "configurations_count": 4,
+        "trims_count": 9,
+        "success": true
+      },
+      "error": null,
+      "details": {
+        "car_code": "3317",
+        "configs": 4,
+        "trims": 9
+      }
+    }
+  ]
+}
