@@ -143,19 +143,23 @@ class KBChaChaParser:
                 }
 
             result = json_data.get("result", {})
-            # Assuming the structure contains generation data - need to see actual response
-            # This is a placeholder implementation
             generations = []
 
-            # Parse based on actual structure once we see the JSON response
-            if "model" in result:
-                for gen_data in result["model"]:
+            # Parse generations from codeModel array
+            if "codeModel" in result:
+                for model_data in result["codeModel"]:
+                    # Extract model year range from modelName if available
+                    model_year = None
+                    if "modelName" in model_data:
+                        # Look for year patterns like "2.5 가솔린 2WD" -> extract engine info as year context
+                        model_year = model_data["modelName"]
+
                     generations.append(
                         KBGeneration(
-                            modelCode=gen_data.get("modelCode", ""),
-                            modelName=gen_data.get("modelName", ""),
-                            modelYear=gen_data.get("modelYear"),
-                            count=gen_data.get("count", 0),
+                            modelCode=model_data.get("modelCode", ""),
+                            modelName=model_data.get("modelName", ""),
+                            modelYear=model_year,
+                            count=0,  # Count not available in this structure
                         )
                     )
 
@@ -163,7 +167,11 @@ class KBChaChaParser:
                 "success": True,
                 "generations": generations,
                 "total_count": len(generations),
-                "meta": {"parser": "kbchachacha_generations"},
+                "meta": {
+                    "parser": "kbchachacha_generations",
+                    "source": "codeModel array",
+                    "note": "Parsed from carModel.json response with carCode parameter",
+                },
             }
 
         except Exception as e:
@@ -199,12 +207,24 @@ class KBChaChaParser:
             # Parse configurations (codeModel)
             if "codeModel" in result:
                 for config_data in result["codeModel"]:
-                    configurations.append(KBConfiguration(**config_data))
+                    configurations.append(
+                        KBConfiguration(
+                            codeModel=config_data.get("modelCode", ""),
+                            nameModel=config_data.get("modelName", ""),
+                            count=0,  # Count not available in API response
+                        )
+                    )
 
             # Parse trims/grades (codeGrade)
             if "codeGrade" in result:
                 for trim_data in result["codeGrade"]:
-                    trims.append(KBTrim(**trim_data))
+                    trims.append(
+                        KBTrim(
+                            codeGrade=trim_data.get("gradeCode", ""),
+                            nameGrade=trim_data.get("gradeName", ""),
+                            count=0,  # Count not available in API response
+                        )
+                    )
 
             return {
                 "success": True,

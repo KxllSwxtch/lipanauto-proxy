@@ -296,21 +296,21 @@ class KBChaChaService:
                 },
             )
 
-    async def get_generations(self, class_code: str) -> KBGenerationsResponse:
+    async def get_generations(self, car_code: str) -> KBGenerationsResponse:
         """
-        Get car generations for specific model class
+        Get car generations for specific car code
 
         Args:
-            class_code: Model class code
+            car_code: Car code (e.g., "3301" for 그랜저)
 
         Returns:
             KBGenerationsResponse with generations
         """
         try:
-            logger.info(f"Fetching car generations for class {class_code}")
+            logger.info(f"Fetching car generations for car code {car_code}")
 
             url = f"{self.base_url}/public/search/carModel.json"
-            params = {"page": "1", "sort": "-orderDate", "classCode": class_code}
+            params = {"page": "1", "sort": "-orderDate", "carCode": car_code}
 
             response_data = await self._make_request(url, params)
 
@@ -321,7 +321,7 @@ class KBChaChaService:
                     meta={
                         "error": response_data.get("error", "Unknown error"),
                         "service": "kbchachacha_generations",
-                        "class_code": class_code,
+                        "car_code": car_code,
                     },
                 )
 
@@ -337,7 +337,7 @@ class KBChaChaService:
                         meta={
                             "error": parsed_data.get("error", "Parser error"),
                             "service": "kbchachacha_generations",
-                            "class_code": class_code,
+                            "car_code": car_code,
                         },
                     )
 
@@ -345,7 +345,7 @@ class KBChaChaService:
                     success=True,
                     generations=parsed_data["generations"],
                     total_count=parsed_data["total_count"],
-                    meta={**parsed_data.get("meta", {}), "class_code": class_code},
+                    meta={**parsed_data.get("meta", {}), "car_code": car_code},
                 )
 
             except json.JSONDecodeError as e:
@@ -356,37 +356,40 @@ class KBChaChaService:
                     meta={
                         "error": f"JSON decode error: {str(e)}",
                         "service": "kbchachacha_generations",
-                        "class_code": class_code,
+                        "car_code": car_code,
                     },
                 )
 
         except Exception as e:
-            logger.error(f"Error fetching generations for class {class_code}: {str(e)}")
+            logger.error(
+                f"Error fetching generations for car code {car_code}: {str(e)}"
+            )
             return KBGenerationsResponse(
                 success=False,
                 total_count=0,
                 meta={
                     "error": f"Service error: {str(e)}",
                     "service": "kbchachacha_generations",
-                    "class_code": class_code,
+                    "car_code": car_code,
                 },
             )
 
-    async def get_configs_trims(self, model_code: str) -> KBConfigsTrimsResponse:
+    async def get_configs_trims(self, car_code: str) -> KBConfigsTrimsResponse:
         """
-        Get configurations and trims for specific model
+        Get configurations and trims for specific car code
 
         Args:
-            model_code: Model code
+            car_code: Car code (same as generations endpoint)
 
         Returns:
             KBConfigsTrimsResponse with configurations and trims
         """
         try:
-            logger.info(f"Fetching configurations and trims for model {model_code}")
+            logger.info(f"Fetching configurations and trims for car code {car_code}")
 
-            url = f"{self.base_url}/public/search/carGrade.json"
-            params = {"page": "1", "sort": "-orderDate", "modelCode": model_code}
+            # Use same API as generations - it contains both codeModel and codeGrade
+            url = f"{self.base_url}/public/search/carModel.json"
+            params = {"page": "1", "sort": "-orderDate", "carCode": car_code}
 
             response_data = await self._make_request(url, params)
 
@@ -396,7 +399,7 @@ class KBChaChaService:
                     meta={
                         "error": response_data.get("error", "Unknown error"),
                         "service": "kbchachacha_configs_trims",
-                        "model_code": model_code,
+                        "car_code": car_code,
                     },
                 )
 
@@ -411,7 +414,7 @@ class KBChaChaService:
                         meta={
                             "error": parsed_data.get("error", "Parser error"),
                             "service": "kbchachacha_configs_trims",
-                            "model_code": model_code,
+                            "car_code": car_code,
                         },
                     )
 
@@ -419,7 +422,7 @@ class KBChaChaService:
                     success=True,
                     configurations=parsed_data["configurations"],
                     trims=parsed_data["trims"],
-                    meta={**parsed_data.get("meta", {}), "model_code": model_code},
+                    meta={**parsed_data.get("meta", {}), "car_code": car_code},
                 )
 
             except json.JSONDecodeError as e:
@@ -429,20 +432,20 @@ class KBChaChaService:
                     meta={
                         "error": f"JSON decode error: {str(e)}",
                         "service": "kbchachacha_configs_trims",
-                        "model_code": model_code,
+                        "car_code": car_code,
                     },
                 )
 
         except Exception as e:
             logger.error(
-                f"Error fetching configs/trims for model {model_code}: {str(e)}"
+                f"Error fetching configs/trims for car code {car_code}: {str(e)}"
             )
             return KBConfigsTrimsResponse(
                 success=False,
                 meta={
                     "error": f"Service error: {str(e)}",
                     "service": "kbchachacha_configs_trims",
-                    "model_code": model_code,
+                    "car_code": car_code,
                 },
             )
 

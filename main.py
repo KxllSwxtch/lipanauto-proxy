@@ -851,6 +851,8 @@ async def root():
             "kbchachacha": [
                 "/api/kbchachacha/manufacturers",
                 "/api/kbchachacha/models/{maker_code}",
+                "/api/kbchachacha/generations/{car_code}",
+                "/api/kbchachacha/configs-trims/{car_code}",
                 "/api/kbchachacha/search",
                 "/api/kbchachacha/filters",
                 "/api/kbchachacha/default",
@@ -1431,6 +1433,81 @@ async def get_kbchachacha_models(maker_code: str):
         raise
     except Exception as e:
         logger.error(f"Error in KBChaChaCha models endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get(
+    "/api/kbchachacha/generations/{car_code}", response_model=KBGenerationsResponse
+)
+async def get_kbchachacha_generations(car_code: str):
+    """
+    Get car generations for specific car code
+
+    **Parameters:**
+    - **car_code**: Car code (e.g., "3301" for 그랜저, "3317" for 아반떼)
+
+    **Returns:**
+    List of generations/variants for the specified car
+    with model configurations and engine options.
+
+    **Example:**
+    - Hyundai Grandeur generations: `/api/kbchachacha/generations/3301`
+    - Hyundai Avante generations: `/api/kbchachacha/generations/3317`
+
+    **Note:** Car codes can be found in the models endpoint result.
+    """
+    try:
+        result = await kbchachacha_service.get_generations(car_code)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch generations for car {car_code}: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in KBChaChaCha generations endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get(
+    "/api/kbchachacha/configs-trims/{car_code}", response_model=KBConfigsTrimsResponse
+)
+async def get_kbchachacha_configs_trims(car_code: str):
+    """
+    Get configurations and trim levels for specific car
+
+    **Parameters:**
+    - **car_code**: Car code (same as generations endpoint, e.g., "3301")
+
+    **Returns:**
+    - **configurations**: Available model configurations
+    - **trims**: Available trim levels/grades
+
+    **Example:**
+    - Model configurations and trims: `/api/kbchachacha/configs-trims/3301`
+
+    This provides the deepest level of filtering for precise car searches.
+    """
+    try:
+        result = await kbchachacha_service.get_configs_trims(car_code)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch configs/trims for car {car_code}: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in KBChaChaCha configs/trims endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
