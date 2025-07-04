@@ -54,7 +54,7 @@ class KBCarModel(BaseModel):
     makerName: str = Field(description="Manufacturer name")
     makerCode: str = Field(description="Manufacturer code")
     classOrder: int = Field(description="Class order")
-    className: str = Field(description="Model name (그랜저, 아반떼, etc.)")
+    modelName: str = Field(description="Model name (그랜저, 아반떼, etc.)")
     classCode: str = Field(description="Class/model unique code")
     carCode: str = Field(description="Car code")
 
@@ -71,8 +71,8 @@ class KBModelsResponse(BaseModel):
 class KBGeneration(BaseModel):
     """Car generation/variant information"""
 
-    modelCode: str = Field(description="Model code")
-    modelName: str = Field(description="Model full name")
+    codeModel: str = Field(description="Model code")
+    nameModel: str = Field(description="Model full name")
     modelYear: Optional[str] = Field(description="Model year range")
     count: int = Field(description="Number of cars available")
 
@@ -110,6 +110,7 @@ class KBConfigsTrimsResponse(BaseModel):
         default=[], description="Car configurations"
     )
     trims: List[KBTrim] = Field(default=[], description="Car trims/grades")
+    total_count: int = Field(description="Total configurations and trims count")
     meta: Optional[Dict[str, Any]] = None
 
 

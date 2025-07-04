@@ -1,0 +1,245 @@
+{
+  "success": true,
+  "successful_tests": 5,
+  "total_tests": 5,
+  "errors": [
+    {
+      "test": "configs_trims",
+      "error": "Неверная структура комплектации #0 для 포터: codeGrade='001' nameGrade='디럭스팩' count=0",
+      "details": {}
+    },
+    {
+      "test": "configs_trims",
+      "error": "Исключение при тестировании 포터: 'KBTrim' object has no attribute 'nameModel'",
+      "details": {
+        "traceback": "Traceback (most recent call last):\n  File \"/Users/admin/Desktop/Coding/Encar Proxy/lipanauto-proxy/kbchachacha_debug_test.py\", line 460, in test_configs_trims\n    f\"   📝 Примеры комплектаций: {[t.nameModel for t in sample_trims]}\"\n                                    ^^^^^^^^^^^\n  File \"/Users/admin/Desktop/Coding/Encar Proxy/lipanauto-proxy/venv/lib/python3.13/site-packages/pydantic/main.py\", line 984, in __getattr__\n    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')\nAttributeError: 'KBTrim' object has no attribute 'nameModel'\n"
+      }
+    },
+    {
+      "test": "configs_trims",
+      "error": "Неверная структура комплектации #0 для 카니발: codeGrade='001' nameGrade='기본형' count=0",
+      "details": {}
+    },
+    {
+      "test": "configs_trims",
+      "error": "Исключение при тестировании 카니발: 'KBTrim' object has no attribute 'nameModel'",
+      "details": {
+        "traceback": "Traceback (most recent call last):\n  File \"/Users/admin/Desktop/Coding/Encar Proxy/lipanauto-proxy/kbchachacha_debug_test.py\", line 460, in test_configs_trims\n    f\"   📝 Примеры комплектаций: {[t.nameModel for t in sample_trims]}\"\n                                    ^^^^^^^^^^^\n  File \"/Users/admin/Desktop/Coding/Encar Proxy/lipanauto-proxy/venv/lib/python3.13/site-packages/pydantic/main.py\", line 984, in __getattr__\n    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')\nAttributeError: 'KBTrim' object has no attribute 'nameModel'\n"
+      }
+    },
+    {
+      "test": "configs_trims",
+      "error": "Неверная структура комплектации #0 для 봉고: codeGrade='001' nameGrade='기본형' count=0",
+      "details": {}
+    },
+    {
+      "test": "configs_trims",
+      "error": "Исключение при тестировании 봉고: 'KBTrim' object has no attribute 'nameModel'",
+      "details": {
+        "traceback": "Traceback (most recent call last):\n  File \"/Users/admin/Desktop/Coding/Encar Proxy/lipanauto-proxy/kbchachacha_debug_test.py\", line 460, in test_configs_trims\n    f\"   📝 Примеры комплектаций: {[t.nameModel for t in sample_trims]}\"\n                                    ^^^^^^^^^^^\n  File \"/Users/admin/Desktop/Coding/Encar Proxy/lipanauto-proxy/venv/lib/python3.13/site-packages/pydantic/main.py\", line 984, in __getattr__\n    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')\nAttributeError: 'KBTrim' object has no attribute 'nameModel'\n"
+      }
+    }
+  ],
+  "test_results": {
+    "manufacturers": {
+      "success": true,
+      "total_count": 82,
+      "domestic_count": 7,
+      "imported_count": 75,
+      "sample_domestic": [
+        "countryCode='국산' makerOrder=1 makerName='현대' makerCode='101' count=53836",
+        "countryCode='국산' makerOrder=2 makerName='제네시스' makerCode='189' count=7649",
+        "countryCode='국산' makerOrder=3 makerName='기아' makerCode='102' count=46144"
+      ],
+      "sample_imported": [
+        "countryCode='수입' makerOrder=10 makerName='벤츠' makerCode='108' count=8140",
+        "countryCode='수입' makerOrder=11 makerName='BMW' makerCode='107' count=8448",
+        "countryCode='수입' makerOrder=12 makerName='아우디' makerCode='109' count=2512"
+      ]
+    },
+    "models": {
+      "success": true,
+      "successful_makers": 4,
+      "total_makers": 4,
+      "results": {
+        "현대": {
+          "success": true,
+          "count": 55,
+          "sample_models": [
+            "useCode='002005' useCodeName='대형' countryOrder=1 makerOrder=5974 makerName='현대' makerCode='101' classOrder=311 className='그랜저' classCode='1101' carCode='3301'",
+            "useCode='002011' useCodeName='트럭' countryOrder=1 makerOrder=5974 makerName='현대' makerCode='101' classOrder=5719 className='포터' classCode='1126' carCode='1167'",
+            "useCode='002003' useCodeName='준중형' countryOrder=1 makerOrder=5974 makerName='현대' makerCode='101' classOrder=3622 className='아반떼' classCode='1109' carCode='3317'",
+            "useCode='002004' useCodeName='중형' countryOrder=1 makerOrder=5974 makerName='현대' makerCode='101' classOrder=3406 className='쏘나타' classCode='1108' carCode='3330'",
+            "useCode='002008' useCodeName='SUV' countryOrder=1 makerOrder=5974 makerName='현대' makerCode='101' classOrder=3377 className='싼타페' classCode='1121' carCode='3354'"
+          ],
+          "maker_code": "101"
+        },
+        "기아": {
+          "success": true,
+          "count": 43,
+          "sample_models": [
+            "useCode='002007' useCodeName='RV' countryOrder=1 makerOrder=322 makerName='기아' makerCode='102' classOrder=5131 className='카니발' classCode='1153' carCode='3376'",
+            "useCode='002011' useCodeName='트럭' countryOrder=1 makerOrder=322 makerName='기아' makerCode='102' classOrder=2592 className='봉고' classCode='1157' carCode='3032'",
+            "useCode='002001' useCodeName='경차' countryOrder=1 makerOrder=322 makerName='기아' makerCode='102' classOrder=2128 className='모닝' classCode='1166' carCode='3346'",
+            "useCode='002008' useCodeName='SUV' countryOrder=1 makerOrder=322 makerName='기아' makerCode='102' classOrder=3406 className='쏘렌토' classCode='1152' carCode='3356'",
+            "useCode='002004' useCodeName='중형' countryOrder=1 makerOrder=322 makerName='기아' makerCode='102' classOrder=6249 className='K5' classCode='1225' carCode='3374'"
+          ],
+          "maker_code": "102"
+        },
+        "벤츠": {
+          "success": true,
+          "count": 36,
+          "sample_models": [
+            "useCode='002004' useCodeName='중형' countryOrder=2 makerOrder=2565 makerName='벤츠' makerCode='108' classOrder=6243 className='E-클래스' classCode='1924' carCode='3387'",
+            "useCode='002005' useCodeName='대형' countryOrder=2 makerOrder=2565 makerName='벤츠' makerCode='108' classOrder=6257 className='S-클래스' classCode='1930' carCode='3163'",
+            "useCode='002003' useCodeName='준중형' countryOrder=2 makerOrder=2565 makerName='벤츠' makerCode='108' classOrder=6241 className='C-클래스' classCode='1920' carCode='3257'",
+            "useCode='002008' useCodeName='SUV' countryOrder=2 makerOrder=2565 makerName='벤츠' makerCode='108' classOrder=6245 className='GLE-클래스' classCode='2645' carCode='3095'",
+            "useCode='002008' useCodeName='SUV' countryOrder=2 makerOrder=2565 makerName='벤츠' makerCode='108' classOrder=6245 className='GLC-클래스' classCode='2646' carCode='3349'"
+          ],
+          "maker_code": "108"
+        },
+        "BMW": {
+          "success": true,
+          "count": 27,
+          "sample_models": [
+            "useCode='002004' useCodeName='중형' countryOrder=2 makerOrder=6240 makerName='BMW' makerCode='107' classOrder=6296 className='5시리즈' classCode='1904' carCode='3372'",
+            "useCode='002003' useCodeName='준중형' countryOrder=2 makerOrder=6240 makerName='BMW' makerCode='107' classOrder=6294 className='3시리즈' classCode='1903' carCode='2989'",
+            "useCode='002008' useCodeName='SUV' countryOrder=2 makerOrder=6240 makerName='BMW' makerCode='107' classOrder=6262 className='X5' classCode='1911' carCode='2979'",
+            "useCode='002004' useCodeName='중형' countryOrder=2 makerOrder=6240 makerName='BMW' makerCode='107' classOrder=311 className='그란투리스모 (GT)' classCode='1916' carCode='2034'",
+            "useCode='002005' useCodeName='대형' countryOrder=2 makerOrder=6240 makerName='BMW' makerCode='107' classOrder=6298 className='7시리즈' classCode='1906' carCode='3314'"
+          ],
+          "maker_code": "107"
+        }
+      }
+    },
+    "generations": {
+      "success": true,
+      "successful_models": 6,
+      "total_models": 6,
+      "results": {
+        "그랜저": {
+          "success": true,
+          "count": 4,
+          "sample_generations": [
+            "modelCode='11053' modelName='2.0' modelYear='2.0' count=0",
+            "modelCode='11054' modelName='2.4' modelYear='2.4' count=0",
+            "modelCode='11055' modelName='2.7' modelYear='2.7' count=0"
+          ],
+          "car_code": "1101"
+        },
+        "포터": {
+          "success": true,
+          "count": 15,
+          "sample_generations": [
+            "modelCode='11666' modelName='1.5 ESSENTIAL' modelYear='1.5 ESSENTIAL' count=0",
+            "modelCode='11663' modelName='1.5 GLS' modelYear='1.5 GLS' count=0",
+            "modelCode='11665' modelName='1.5 SPECIAL' modelYear='1.5 SPECIAL' count=0"
+          ],
+          "car_code": "1126"
+        },
+        "카니발": {
+          "success": true,
+          "count": 16,
+          "sample_generations": [
+            "modelCode='11506' modelName='SOHC STD' modelYear='SOHC STD' count=0",
+            "modelCode='11507' modelName='SOHC DLX' modelYear='SOHC DLX' count=0",
+            "modelCode='11511' modelName='DOHC DLX' modelYear='DOHC DLX' count=0"
+          ],
+          "car_code": "1153"
+        },
+        "봉고": {
+          "success": true,
+          "count": 11,
+          "sample_generations": [
+            "modelCode='11876' modelName='2WD 2.5 인터쿨러 디젤 JX250' modelYear='2WD 2.5 인터쿨러 디젤 JX250' count=0",
+            "modelCode='11879' modelName='3.5 V6 DOHC 가솔린 VX 350' modelYear='3.5 V6 DOHC 가솔린 VX 350' count=0",
+            "modelCode='11880' modelName='2WD 2.9 CRDi EX290' modelYear='2WD 2.9 CRDi EX290' count=0"
+          ],
+          "car_code": "1157"
+        },
+        "E-클래스": {
+          "success": true,
+          "count": 7,
+          "sample_generations": [
+            "modelCode='16408' modelName='5.3L' modelYear='5.3L' count=0",
+            "modelCode='20749' modelName='5.7' modelYear='5.7' count=0",
+            "modelCode='18298' modelName='6.0 하이브리드' modelYear='6.0 하이브리드' count=0"
+          ],
+          "car_code": "1924"
+        },
+        "S-클래스": {
+          "success": true,
+          "count": 3,
+          "sample_generations": [
+            "modelCode='20770' modelName='T 3.9 V8' modelYear='T 3.9 V8' count=0",
+            "modelCode='16424' modelName='4.3 V8' modelYear='4.3 V8' count=0",
+            "modelCode='20771' modelName='30 4.3 V8' modelYear='30 4.3 V8' count=0"
+          ],
+          "car_code": "1930"
+        }
+      }
+    },
+    "configs": {
+      "success": true,
+      "successful_models": 1,
+      "total_models": 4,
+      "results": {
+        "그랜저": {
+          "success": true,
+          "config_count": 4,
+          "trim_count": 0,
+          "sample_configs": [
+            "codeModel='11053' nameModel='2.0' count=0",
+            "codeModel='11054' nameModel='2.4' count=0",
+            "codeModel='11055' nameModel='2.7' count=0"
+          ],
+          "sample_trims": []
+        },
+        "포터": {
+          "success": false,
+          "error": "'KBTrim' object has no attribute 'nameModel'"
+        },
+        "카니발": {
+          "success": false,
+          "error": "'KBTrim' object has no attribute 'nameModel'"
+        },
+        "봉고": {
+          "success": false,
+          "error": "'KBTrim' object has no attribute 'nameModel'"
+        }
+      }
+    },
+    "search": {
+      "success": true,
+      "successful_scenarios": 5,
+      "total_scenarios": 5,
+      "results": {
+        "Базовый поиск": {
+          "success": true,
+          "listing_count": 40,
+          "total_count": 40
+        },
+        "Поиск по марке Hyundai": {
+          "success": true,
+          "listing_count": 40,
+          "total_count": 40
+        },
+        "Поиск новых авто 2022-2024": {
+          "success": true,
+          "listing_count": 40,
+          "total_count": 40
+        },
+        "Поиск электромобилей": {
+          "success": true,
+          "listing_count": 40,
+          "total_count": 40
+        },
+        "Поиск бюджетных авто до 2000万원": {
+          "success": true,
+          "listing_count": 40,
+          "total_count": 40
+        }
+      }
+    }
+  }
+}

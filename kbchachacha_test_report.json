@@ -1,0 +1,149 @@
+{
+  "manufacturers": {
+    "success": true,
+    "response_time": 1.11,
+    "total_count": 82,
+    "domestic_count": 7,
+    "imported_count": 75,
+    "errors": [],
+    "sample_domestic_code": "101",
+    "sample_imported_code": "108"
+  },
+  "models": {
+    "success": true,
+    "tested_manufacturers": [
+      {
+        "maker_code": "101",
+        "success": true,
+        "response_time": 0.46,
+        "total_count": 55,
+        "models_count": 55,
+        "sample_model_code": "3301",
+        "sample_model_name": "그랜저"
+      },
+      {
+        "maker_code": "108",
+        "success": true,
+        "response_time": 1.0,
+        "total_count": 36,
+        "models_count": 36,
+        "sample_model_code": "3387",
+        "sample_model_name": "E-클래스"
+      }
+    ],
+    "errors": []
+  },
+  "generations": {
+    "success": true,
+    "tested_models": [
+      {
+        "car_code": "3301",
+        "success": true,
+        "response_time": 0.96,
+        "total_count": 6,
+        "generations_count": 6,
+        "sample_generation_code": "26725",
+        "sample_generation_name": "2.5 가솔린 2WD"
+      },
+      {
+        "car_code": "3387",
+        "success": true,
+        "response_time": 0.97,
+        "total_count": 7,
+        "generations_count": 7,
+        "sample_generation_code": "26663",
+        "sample_generation_name": "40 TFSI"
+      }
+    ],
+    "errors": []
+  },
+  "configs_trims": {
+    "success": true,
+    "tested_models": [
+      {
+        "car_code": "3301",
+        "success": true,
+        "response_time": 1.02,
+        "total_count": 29,
+        "configurations_count": 6,
+        "trims_count": 23
+      },
+      {
+        "car_code": "3387",
+        "success": true,
+        "response_time": 1.07,
+        "total_count": 18,
+        "configurations_count": 7,
+        "trims_count": 11
+      }
+    ],
+    "errors": []
+  },
+  "cascade_test": {
+    "success": true,
+    "flow_steps": [
+      {
+        "step": "manufacturers",
+        "success": true,
+        "selected": "현대 (101)"
+      },
+      {
+        "step": "models",
+        "success": true,
+        "selected": "그랜저 (3301)"
+      },
+      {
+        "step": "generations",
+        "success": true,
+        "count": 6
+      },
+      {
+        "step": "configs_trims",
+        "success": true,
+        "configs_count": 6,
+        "trims_count": 23
+      }
+    ],
+    "errors": []
+  },
+  "search_test": {
+    "success": true,
+    "search_tests": [
+      {
+        "test_name": "basic_search",
+        "success": true,
+        "total_count": 40,
+        "listings_count": 40
+      },
+      {
+        "test_name": "manufacturer_search",
+        "success": true,
+        "total_count": 40,
+        "listings_count": 40
+      },
+      {
+        "test_name": "complex_search",
+        "success": true,
+        "total_count": 40,
+        "listings_count": 40,
+        "filters": {
+          "manufacturer": "현대",
+          "year_range": "2020-2024",
+          "max_price": "3000만원",
+          "fuel_types": [
+            "gasoline",
+            "hybrid_gasoline"
+          ]
+        }
+      }
+    ],
+    "errors": []
+  },
+  "summary": {
+    "total_tests": 6,
+    "passed_tests": 6,
+    "success_rate": 100.0,
+    "timestamp": 1751618106.477591,
+    "status": "SUCCESS"
+  }
+}

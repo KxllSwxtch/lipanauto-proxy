@@ -396,6 +396,7 @@ class KBChaChaService:
             if not response_data.get("success"):
                 return KBConfigsTrimsResponse(
                     success=False,
+                    total_count=0,
                     meta={
                         "error": response_data.get("error", "Unknown error"),
                         "service": "kbchachacha_configs_trims",
@@ -411,6 +412,7 @@ class KBChaChaService:
                 if not parsed_data.get("success"):
                     return KBConfigsTrimsResponse(
                         success=False,
+                        total_count=0,
                         meta={
                             "error": parsed_data.get("error", "Parser error"),
                             "service": "kbchachacha_configs_trims",
@@ -422,6 +424,8 @@ class KBChaChaService:
                     success=True,
                     configurations=parsed_data["configurations"],
                     trims=parsed_data["trims"],
+                    total_count=len(parsed_data["configurations"])
+                    + len(parsed_data["trims"]),
                     meta={**parsed_data.get("meta", {}), "car_code": car_code},
                 )
 
@@ -429,6 +433,7 @@ class KBChaChaService:
                 logger.error(f"JSON decode error: {str(e)}")
                 return KBConfigsTrimsResponse(
                     success=False,
+                    total_count=0,
                     meta={
                         "error": f"JSON decode error: {str(e)}",
                         "service": "kbchachacha_configs_trims",
@@ -442,6 +447,7 @@ class KBChaChaService:
             )
             return KBConfigsTrimsResponse(
                 success=False,
+                total_count=0,
                 meta={
                     "error": f"Service error: {str(e)}",
                     "service": "kbchachacha_configs_trims",

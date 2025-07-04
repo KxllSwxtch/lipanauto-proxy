@@ -107,6 +107,9 @@ class KBChaChaParser:
 
             models = []
             for model_data in code_array:
+                # Map className to modelName for consistency
+                if "className" in model_data and "modelName" not in model_data:
+                    model_data["modelName"] = model_data["className"]
                 models.append(KBCarModel(**model_data))
 
             return {
@@ -156,8 +159,8 @@ class KBChaChaParser:
 
                     generations.append(
                         KBGeneration(
-                            modelCode=model_data.get("modelCode", ""),
-                            modelName=model_data.get("modelName", ""),
+                            codeModel=model_data.get("modelCode", ""),
+                            nameModel=model_data.get("modelName", ""),
                             modelYear=model_year,
                             count=0,  # Count not available in this structure
                         )
