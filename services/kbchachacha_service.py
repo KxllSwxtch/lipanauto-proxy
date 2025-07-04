@@ -296,21 +296,22 @@ class KBChaChaService:
                 },
             )
 
-    async def get_generations(self, car_code: str) -> KBGenerationsResponse:
+    async def get_generations(self, class_code: str) -> KBGenerationsResponse:
         """
-        Get car generations for specific car code
+        Get car generations for specific model class
 
         Args:
-            car_code: Car code (e.g., "3301" for 그랜저)
+            class_code: Model class code (e.g., "1101" for 그랜저, "1108" for 쏘나타)
 
         Returns:
             KBGenerationsResponse with generations
         """
         try:
-            logger.info(f"Fetching car generations for car code {car_code}")
+            logger.info(f"Fetching car generations for class code {class_code}")
 
-            url = f"{self.base_url}/public/search/carModel.json"
-            params = {"page": "1", "sort": "-orderDate", "carCode": car_code}
+            # Use carName.json API for generations (not carModel.json)
+            url = f"{self.base_url}/public/search/carName.json"
+            params = {"page": "1", "sort": "-orderDate", "classCode": class_code}
 
             response_data = await self._make_request(url, params)
 
@@ -321,7 +322,7 @@ class KBChaChaService:
                     meta={
                         "error": response_data.get("error", "Unknown error"),
                         "service": "kbchachacha_generations",
-                        "car_code": car_code,
+                        "class_code": class_code,
                     },
                 )
 
@@ -337,7 +338,7 @@ class KBChaChaService:
                         meta={
                             "error": parsed_data.get("error", "Parser error"),
                             "service": "kbchachacha_generations",
-                            "car_code": car_code,
+                            "class_code": class_code,
                         },
                     )
 
@@ -345,7 +346,7 @@ class KBChaChaService:
                     success=True,
                     generations=parsed_data["generations"],
                     total_count=parsed_data["total_count"],
-                    meta={**parsed_data.get("meta", {}), "car_code": car_code},
+                    meta={**parsed_data.get("meta", {}), "class_code": class_code},
                 )
 
             except json.JSONDecodeError as e:
@@ -356,13 +357,13 @@ class KBChaChaService:
                     meta={
                         "error": f"JSON decode error: {str(e)}",
                         "service": "kbchachacha_generations",
-                        "car_code": car_code,
+                        "class_code": class_code,
                     },
                 )
 
         except Exception as e:
             logger.error(
-                f"Error fetching generations for car code {car_code}: {str(e)}"
+                f"Error fetching generations for class code {class_code}: {str(e)}"
             )
             return KBGenerationsResponse(
                 success=False,
@@ -370,7 +371,7 @@ class KBChaChaService:
                 meta={
                     "error": f"Service error: {str(e)}",
                     "service": "kbchachacha_generations",
-                    "car_code": car_code,
+                    "class_code": class_code,
                 },
             )
 

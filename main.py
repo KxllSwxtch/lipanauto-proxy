@@ -1444,32 +1444,37 @@ async def get_kbchachacha_models(maker_code: str):
 
 
 @app.get(
-    "/api/kbchachacha/generations/{car_code}", response_model=KBGenerationsResponse
+    "/api/kbchachacha/generations/{class_code}", response_model=KBGenerationsResponse
 )
-async def get_kbchachacha_generations(car_code: str):
+async def get_kbchachacha_generations(class_code: str):
     """
-    Get car generations for specific car code
+    Get car generations for specific model class
 
     **Parameters:**
-    - **car_code**: Car code (e.g., "3301" for 그랜저, "3317" for 아반떼)
+    - **class_code**: Model class code (e.g., "1101" for 그랜저, "1109" for 아반떼, "1108" for 쏘나타)
 
     **Returns:**
-    List of generations/variants for the specified car
-    with model configurations and engine options.
+    List of generations/variants for the specified car model
+    with year ranges and generation names (e.g., "DN8", "LF", "YF").
 
     **Example:**
-    - Hyundai Grandeur generations: `/api/kbchachacha/generations/3301`
-    - Hyundai Avante generations: `/api/kbchachacha/generations/3317`
+    - Hyundai Grandeur generations: `/api/kbchachacha/generations/1101`
+    - Hyundai Avante generations: `/api/kbchachacha/generations/1109`
+    - Hyundai Sonata generations: `/api/kbchachacha/generations/1108`
 
-    **Note:** Car codes can be found in the models endpoint result.
+    **Note:** Class codes can be found in the models endpoint result (classCode field).
+
+    **What you get:**
+    - Real car generations like "쏘나타 디 엣지(DN8) (2023-현재)", "LF쏘나타 (2014-2017)"
+    - Not engine configurations (those are in configs-trims endpoint)
     """
     try:
-        result = await kbchachacha_service.get_generations(car_code)
+        result = await kbchachacha_service.get_generations(class_code)
 
         if not result.success:
             raise HTTPException(
                 status_code=502,
-                detail=f"Failed to fetch generations for car {car_code}: {result.meta.get('error', 'Unknown error')}",
+                detail=f"Failed to fetch generations for class {class_code}: {result.meta.get('error', 'Unknown error')}",
             )
 
         return result

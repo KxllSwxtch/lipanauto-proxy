@@ -132,7 +132,7 @@ class KBChaChaParser:
         Parse car generations JSON response
 
         Args:
-            json_data: Raw JSON response from carModel.json
+            json_data: Raw JSON response from carName.json
 
         Returns:
             Dict with parsed generations data
@@ -148,20 +148,21 @@ class KBChaChaParser:
             result = json_data.get("result", {})
             generations = []
 
-            # Parse generations from codeModel array
-            if "codeModel" in result:
-                for model_data in result["codeModel"]:
-                    # Extract model year range from modelName if available
-                    model_year = None
-                    if "modelName" in model_data:
-                        # Look for year patterns like "2.5 가솔린 2WD" -> extract engine info as year context
-                        model_year = model_data["modelName"]
+            # Parse generations from code array (carName.json structure)
+            if "code" in result:
+                for generation_data in result["code"]:
+                    # Extract year range
+                    from_year = generation_data.get("fromYear", "")
+                    to_year = generation_data.get("toYear", "")
+                    year_range = (
+                        f"{from_year}-{to_year}" if from_year and to_year else ""
+                    )
 
                     generations.append(
                         KBGeneration(
-                            codeModel=model_data.get("modelCode", ""),
-                            nameModel=model_data.get("modelName", ""),
-                            modelYear=model_year,
+                            codeModel=generation_data.get("carCode", ""),
+                            nameModel=generation_data.get("carName", ""),
+                            modelYear=year_range,
                             count=0,  # Count not available in this structure
                         )
                     )
@@ -172,8 +173,8 @@ class KBChaChaParser:
                 "total_count": len(generations),
                 "meta": {
                     "parser": "kbchachacha_generations",
-                    "source": "codeModel array",
-                    "note": "Parsed from carModel.json response with carCode parameter",
+                    "source": "code array from carName.json",
+                    "note": "Parsed car generations with year ranges from carName.json API",
                 },
             }
 
