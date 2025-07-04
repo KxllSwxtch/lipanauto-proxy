@@ -538,7 +538,14 @@ class KBChaChaService:
         if filters.modelCode:
             params["modelCode"] = filters.modelCode
         if filters.modelGradeCode:
-            params["modelGradeCode"] = filters.modelGradeCode
+            # Format: {modelCode}|{gradeCode} - KBChaChaCha requires this specific format
+            if filters.modelCode:
+                params["modelGradeCode"] = (
+                    f"{filters.modelCode}|{filters.modelGradeCode}"
+                )
+            else:
+                # If no modelCode provided, use gradeCode as is (fallback)
+                params["modelGradeCode"] = filters.modelGradeCode
 
         # Year filter (연식) - priority: new fields, then legacy
         year_from = filters.year_from or filters.yearFrom
