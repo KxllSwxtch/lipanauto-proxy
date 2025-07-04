@@ -558,8 +558,15 @@ class KBChaChaParser:
             # Extract JSON-LD structured data
             json_ld_data = self._extract_json_ld_data(soup)
 
+            # Extract basic info first (we need title for fallback logic)
+            basic_info = self._extract_basic_info(soup, json_ld_data)
+
             # Extract technical specifications from table
             specifications = self._extract_specifications_table(soup)
+
+            # Apply title-based fallback for engine displacement if needed
+            title = basic_info.get("title", "") or basic_info.get("full_name", "")
+            specifications = self._apply_title_fallback_to_specs(specifications, title)
 
             # Extract pricing information
             pricing = self._extract_pricing_info(soup, json_ld_data)
@@ -572,9 +579,6 @@ class KBChaChaParser:
 
             # Extract seller information
             seller = self._extract_seller_info(soup)
-
-            # Extract basic info
-            basic_info = self._extract_basic_info(soup, json_ld_data)
 
             # Extract images
             images = self._extract_images(json_ld_data)
@@ -638,6 +642,193 @@ class KBChaChaParser:
             logger.error(f"Failed to extract JSON-LD data: {str(e)}")
             return {}
 
+    def _extract_engine_displacement_from_title(self, title: str) -> Optional[str]:
+        """
+        Extract engine displacement from car title when not available in specifications table
+
+        Common patterns:
+        - 220d → 2.2L (diesel)
+        - 320i → 3.2L (gasoline)
+        - 1.6T → 1.6L (turbo)
+        - 2.0T → 2.0L (turbo)
+        - 3.5 → 3.5L
+        - 2500 → 2.5L
+        - 1591cc → 1.591L
+
+        Args:
+            title: Car title/name
+
+        Returns:
+            Estimated engine displacement in cc format or None if not found
+        """
+        if not title:
+            return None
+
+        try:
+            # Pattern 1: XXXd format (e.g., 220d, 320d, 535d)
+            diesel_match = re.search(r"(\d{3})d\b", title, re.IGNORECASE)
+            if diesel_match:
+                # Convert to approximate displacement
+                code = int(diesel_match.group(1))
+                # Common Mercedes/BMW diesel codes
+                displacement_map = {
+                    180: 1800,  # 180d -> 1.8L
+                    200: 2000,  # 200d -> 2.0L
+                    220: 2200,  # 220d -> 2.2L
+                    250: 2500,  # 250d -> 2.5L
+                    300: 3000,  # 300d -> 3.0L
+                    320: 3200,  # 320d -> 3.2L
+                    350: 3500,  # 350d -> 3.5L
+                    400: 4000,  # 400d -> 4.0L
+                    450: 4500,  # 450d -> 4.5L
+                    500: 5000,  # 500d -> 5.0L
+                    535: 5350,  # 535d -> 5.35L
+                }
+
+                # For 3-digit codes, try direct mapping first
+                if code in displacement_map:
+                    return f"{displacement_map[code]:,}cc"
+
+                # For unknown codes, estimate based on patterns
+                if code < 200:
+                    # Likely 1.8L-2.0L range
+                    estimated = code * 10
+                elif code < 300:
+                    # Likely 2.0L-3.0L range
+                    estimated = code * 10
+                elif code < 400:
+                    # Likely 3.0L-4.0L range
+                    estimated = code * 10
+                else:
+                    # Likely 4.0L+ range
+                    estimated = code * 10
+
+                return f"{estimated:,}cc"
+
+            # Pattern 2: XXXi format (e.g., 320i, 535i)
+            gasoline_match = re.search(r"(\d{3})i\b", title, re.IGNORECASE)
+            if gasoline_match:
+                code = int(gasoline_match.group(1))
+                # Common BMW/Mercedes gasoline codes
+                displacement_map = {
+                    116: 1600,  # 116i -> 1.6L
+                    118: 1800,  # 118i -> 1.8L
+                    120: 2000,  # 120i -> 2.0L
+                    125: 2500,  # 125i -> 2.5L
+                    130: 3000,  # 130i -> 3.0L
+                    135: 3500,  # 135i -> 3.5L
+                    320: 3200,  # 320i -> 3.2L
+                    325: 3250,  # 325i -> 3.25L
+                    330: 3300,  # 330i -> 3.3L
+                    335: 3500,  # 335i -> 3.5L
+                    520: 5200,  # 520i -> 5.2L
+                    525: 5250,  # 525i -> 5.25L
+                    530: 5300,  # 530i -> 5.3L
+                    535: 5350,  # 535i -> 5.35L
+                }
+
+                if code in displacement_map:
+                    return f"{displacement_map[code]:,}cc"
+
+                # Estimate for unknown codes
+                if code < 200:
+                    estimated = code * 10
+                elif code < 400:
+                    estimated = code * 10
+                else:
+                    estimated = code * 10
+
+                return f"{estimated:,}cc"
+
+            # Pattern 3: X.XT format (e.g., 1.6T, 2.0T, 3.5T)
+            turbo_match = re.search(r"(\d+\.?\d*)\s*T\b", title, re.IGNORECASE)
+            if turbo_match:
+                displacement = float(turbo_match.group(1))
+                # Convert to cc
+                cc = int(displacement * 1000)
+                return f"{cc:,}cc"
+
+            # Pattern 4: X.X format (e.g., 1.6, 2.0, 3.5)
+            decimal_match = re.search(r"(\d+\.\d+)(?!\d)", title)
+            if decimal_match:
+                displacement = float(decimal_match.group(1))
+                # Only consider reasonable engine sizes (0.5L - 8.0L)
+                if 0.5 <= displacement <= 8.0:
+                    cc = int(displacement * 1000)
+                    return f"{cc:,}cc"
+
+            # Pattern 5: XXXX format (e.g., 1600, 2000, 2500)
+            four_digit_match = re.search(
+                r"\b(1[0-9]{3}|2[0-9]{3}|3[0-9]{3}|4[0-9]{3}|5[0-9]{3}|6[0-9]{3})\b",
+                title,
+            )
+            if four_digit_match:
+                cc = int(four_digit_match.group(1))
+                # Only consider reasonable engine sizes (1000cc - 6000cc)
+                if 1000 <= cc <= 6000:
+                    return f"{cc:,}cc"
+
+            # Pattern 6: Already in cc format (e.g., 1591cc)
+            cc_match = re.search(r"(\d{3,4})\s*cc", title, re.IGNORECASE)
+            if cc_match:
+                cc = int(cc_match.group(1))
+                return f"{cc:,}cc"
+
+            # Pattern 7: Three-digit model codes without suffix (e.g., E350, C300, GLE450)
+            three_digit_model_match = re.search(
+                r"[A-Z]+(\d{3})\b", title, re.IGNORECASE
+            )
+            if three_digit_model_match:
+                code = int(three_digit_model_match.group(1))
+                # Common 3-digit model codes for luxury cars
+                model_displacement_map = {
+                    200: 2000,  # E200, C200, etc.
+                    220: 2200,  # E220, C220, etc.
+                    250: 2500,  # E250, C250, etc.
+                    300: 3000,  # E300, C300, etc.
+                    320: 3200,  # 320 (BMW style)
+                    350: 3500,  # E350, GLE350, etc.
+                    400: 4000,  # E400, GLE400, etc.
+                    450: 4500,  # GLE450, etc.
+                    500: 5000,  # E500, etc.
+                    550: 5500,  # E550, etc.
+                    63: 6300,  # AMG 63 models
+                }
+
+                if code in model_displacement_map:
+                    return f"{model_displacement_map[code]:,}cc"
+
+            # Pattern 8: Model-specific patterns
+            # GLC220d specifically
+            if "GLC220d" in title:
+                return "2,200cc"
+
+            # Add more model-specific patterns as needed
+            model_patterns = {
+                r"GLC200d": "2,000cc",
+                r"GLC250d": "2,500cc",
+                r"GLC300d": "3,000cc",
+                r"C220d": "2,200cc",
+                r"C250d": "2,500cc",
+                r"E220d": "2,200cc",
+                r"E250d": "2,500cc",
+                r"320d": "3,200cc",
+                r"520d": "5,200cc",
+            }
+
+            for pattern, displacement in model_patterns.items():
+                if re.search(pattern, title, re.IGNORECASE):
+                    return displacement
+
+            logger.debug(f"Could not extract engine displacement from title: {title}")
+            return None
+
+        except Exception as e:
+            logger.error(
+                f"Error extracting engine displacement from title '{title}': {str(e)}"
+            )
+            return None
+
     def _extract_specifications_table(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Extract technical specifications from detail-info-table"""
         try:
@@ -656,7 +847,7 @@ class KBChaChaParser:
                                 value = cells[i + 1].get_text(strip=True)
 
                                 # Map Korean headers to English fields
-                                if key == "차량번호":
+                                if key == "차량정보":
                                     specs["license_plate"] = value
                                 elif key == "연식":
                                     specs["model_year"] = value
@@ -666,10 +857,26 @@ class KBChaChaParser:
                                     specs["fuel_type"] = value
                                 elif key == "변속기":
                                     specs["transmission"] = value
-                                elif key == "사용구분":
+                                elif key == "차종":
                                     specs["car_class"] = value
                                 elif key == "배기량":
-                                    specs["engine_displacement"] = value
+                                    # Extract engine displacement with fallback logic
+                                    if (
+                                        value
+                                        and value.strip()
+                                        and value.strip() != "0cc"
+                                    ):
+                                        specs["engine_displacement"] = value
+                                    else:
+                                        # Try to extract from title as fallback
+                                        logger.info(
+                                            f"Engine displacement is '{value}' - attempting to extract from title"
+                                        )
+                                        # We'll set this later when we have access to the title
+                                        specs["engine_displacement"] = (
+                                            value  # Keep original value for now
+                                        )
+                                        specs["_needs_title_fallback"] = True
                                 elif key == "색상":
                                     specs["color"] = value
                                 elif key == "연비":
@@ -684,6 +891,50 @@ class KBChaChaParser:
         except Exception as e:
             logger.error(f"Failed to extract specifications: {str(e)}")
             return {}
+
+    def _apply_title_fallback_to_specs(
+        self, specs: Dict[str, Any], title: str
+    ) -> Dict[str, Any]:
+        """
+        Apply title-based fallback extraction to specifications
+
+        Args:
+            specs: Extracted specifications dict
+            title: Car title/name
+
+        Returns:
+            Updated specifications dict with fallback values applied
+        """
+        if not specs.get("_needs_title_fallback"):
+            return specs
+
+        try:
+            # Extract engine displacement from title
+            title_displacement = self._extract_engine_displacement_from_title(title)
+
+            if title_displacement:
+                current_displacement = specs.get("engine_displacement", "")
+                logger.info(
+                    f"Extracted engine displacement from title: {current_displacement} -> {title_displacement}"
+                )
+                specs["engine_displacement"] = title_displacement
+                specs["_displacement_source"] = "title_fallback"
+            else:
+                logger.warning(
+                    f"Could not extract engine displacement from title: {title}"
+                )
+                specs["_displacement_source"] = "table_only"
+
+            # Remove the fallback flag
+            specs.pop("_needs_title_fallback", None)
+
+            return specs
+
+        except Exception as e:
+            logger.error(f"Error applying title fallback: {str(e)}")
+            # Remove the fallback flag even if we failed
+            specs.pop("_needs_title_fallback", None)
+            return specs
 
     def _extract_pricing_info(
         self, soup: BeautifulSoup, json_ld_data: Dict[str, Any]
