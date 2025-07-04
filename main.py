@@ -32,6 +32,12 @@ from schemas.kbchachacha import (
     KBSearchResponse,
     KBDefaultListResponse,
     KBSearchFilters,
+    KBCarDetailResponse,
+    KBCarSpecification,
+    KBCarPricing,
+    KBCarCondition,
+    KBCarOptions,
+    KBSellerInfo,
 )
 from services.kbchachacha_service import KBChaChaService
 
@@ -856,6 +862,7 @@ async def root():
                 "/api/kbchachacha/search",
                 "/api/kbchachacha/filters",
                 "/api/kbchachacha/default",
+                "/api/kbchachacha/car/{car_seq}",
                 "/api/kbchachacha/test",
             ],
             "system": ["/health"],
@@ -1909,6 +1916,87 @@ async def get_kbchachacha_filters():
 
     except Exception as e:
         logger.error(f"Error in KBChaChaCha filters endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/kbchachacha/car/{car_seq}", response_model=KBCarDetailResponse)
+async def get_kbchachacha_car_details(car_seq: str):
+    """
+    Get detailed information for a specific car
+
+    **Parameters:**
+    - **car_seq**: Car sequence ID (e.g., "27069369")
+
+    **Returns:**
+    Comprehensive car information including:
+    - Basic details (title, brand, model, images)
+    - Technical specifications (engine, transmission, mileage, etc.)
+    - Pricing information (current price, market range, confidence)
+    - Condition assessment (inspection status, mileage analysis)
+    - Options and features (safety, convenience, multimedia)
+    - Seller information (location, description, contact)
+
+    **Example Usage:**
+    - Get Hyundai Veloster details: `/api/kbchachacha/car/27069369`
+    - Use car_seq from search results to get full details
+
+    **Data Sources:**
+    - JSON-LD structured data for basic info and images
+    - HTML table parsing for technical specifications
+    - Multiple page sections for pricing, condition, and options
+    """
+    try:
+        result = await kbchachacha_service.get_car_details(car_seq)
+
+        if not result.get("success"):
+            # Handle specific error cases
+            error_msg = result.get("error", "Unknown error")
+
+            if "may not exist" in error_msg or "unavailable" in error_msg:
+                raise HTTPException(
+                    status_code=404, detail=f"Car not found: {error_msg}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=502, detail=f"Failed to fetch car details: {error_msg}"
+                )
+
+        # Import schema classes for response validation
+        from schemas.kbchachacha import (
+            KBCarDetailResponse,
+            KBCarSpecification,
+            KBCarPricing,
+            KBCarCondition,
+            KBCarOptions,
+            KBSellerInfo,
+        )
+
+        # Validate and structure the response
+        return KBCarDetailResponse(
+            success=True,
+            car_seq=result["car_seq"],
+            title=result["title"],
+            brand=result["brand"],
+            model=result["model"],
+            full_name=result["full_name"],
+            images=result["images"],
+            main_image=result["main_image"],
+            specifications=result["specifications"],
+            pricing=result["pricing"],
+            condition=result["condition"],
+            options=result["options"],
+            seller=result["seller"],
+            description=result["description"],
+            tags=result["tags"],
+            badges=result["badges"],
+            detail_url=result["detail_url"],
+            meta=result.get("meta"),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in KBChaChaCha car details endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

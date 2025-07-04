@@ -536,3 +536,423 @@ class KBChaChaParser:
 
         except Exception:
             return False
+
+    def parse_car_detail_html(self, html_content: str, car_seq: str) -> Dict[str, Any]:
+        """
+        Parse car detail page HTML to extract comprehensive car information
+
+        Args:
+            html_content: HTML content from car detail page
+            car_seq: Car sequence ID
+
+        Returns:
+            Dict with parsed car detail data
+        """
+        try:
+            soup = BeautifulSoup(html_content, self.parser_name)
+
+            # Extract JSON-LD structured data
+            json_ld_data = self._extract_json_ld_data(soup)
+
+            # Extract technical specifications from table
+            specifications = self._extract_specifications_table(soup)
+
+            # Extract pricing information
+            pricing = self._extract_pricing_info(soup, json_ld_data)
+
+            # Extract condition and inspection info
+            condition = self._extract_condition_info(soup)
+
+            # Extract options
+            options = self._extract_options_info(soup)
+
+            # Extract seller information
+            seller = self._extract_seller_info(soup)
+
+            # Extract basic info
+            basic_info = self._extract_basic_info(soup, json_ld_data)
+
+            # Extract images
+            images = self._extract_images(json_ld_data)
+
+            # Extract tags and badges
+            tags, badges = self._extract_tags_badges(soup)
+
+            # Extract description
+            description = self._extract_description(soup)
+
+            return {
+                "success": True,
+                "car_seq": car_seq,
+                "title": basic_info.get("title", ""),
+                "brand": basic_info.get("brand", ""),
+                "model": basic_info.get("model", ""),
+                "full_name": basic_info.get("full_name", ""),
+                "images": images,
+                "main_image": images[0] if images else None,
+                "specifications": specifications,
+                "pricing": pricing,
+                "condition": condition,
+                "options": options,
+                "seller": seller,
+                "description": description,
+                "tags": tags,
+                "badges": badges,
+                "detail_url": f"https://www.kbchachacha.com/public/car/detail.kbc?carSeq={car_seq}",
+                "meta": {
+                    "parser": "kbchachacha_car_detail",
+                    "car_seq": car_seq,
+                    "extracted_sections": [
+                        "json_ld",
+                        "specifications",
+                        "pricing",
+                        "condition",
+                        "options",
+                        "seller",
+                        "images",
+                        "description",
+                    ],
+                },
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to parse car detail HTML: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Parsing error: {str(e)}",
+                "meta": {"parser": "kbchachacha_car_detail", "car_seq": car_seq},
+            }
+
+    def _extract_json_ld_data(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Extract JSON-LD structured data from script tag"""
+        try:
+            json_ld_script = soup.find("script", {"type": "application/ld+json"})
+            if json_ld_script:
+                return json.loads(json_ld_script.string)
+            return {}
+        except Exception as e:
+            logger.error(f"Failed to extract JSON-LD data: {str(e)}")
+            return {}
+
+    def _extract_specifications_table(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Extract technical specifications from detail-info-table"""
+        try:
+            specs = {}
+
+            # Find the main specifications table
+            spec_table = soup.find("table", class_="detail-info-table")
+            if spec_table:
+                rows = spec_table.find_all("tr")
+                for row in rows:
+                    cells = row.find_all(["th", "td"])
+                    if len(cells) >= 2:
+                        for i in range(0, len(cells), 2):
+                            if i + 1 < len(cells):
+                                key = cells[i].get_text(strip=True)
+                                value = cells[i + 1].get_text(strip=True)
+
+                                # Map Korean headers to English fields
+                                if key == "차량번호":
+                                    specs["license_plate"] = value
+                                elif key == "연식":
+                                    specs["model_year"] = value
+                                elif key == "주행거리":
+                                    specs["mileage"] = value
+                                elif key == "연료":
+                                    specs["fuel_type"] = value
+                                elif key == "변속기":
+                                    specs["transmission"] = value
+                                elif key == "사용구분":
+                                    specs["car_class"] = value
+                                elif key == "배기량":
+                                    specs["engine_displacement"] = value
+                                elif key == "색상":
+                                    specs["color"] = value
+                                elif key == "연비":
+                                    specs["fuel_efficiency"] = value
+                                elif key == "구동방식":
+                                    specs["drivetrain"] = value
+                                elif key == "승차인원":
+                                    specs["seating_capacity"] = value
+
+            return specs
+
+        except Exception as e:
+            logger.error(f"Failed to extract specifications: {str(e)}")
+            return {}
+
+    def _extract_pricing_info(
+        self, soup: BeautifulSoup, json_ld_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract pricing information from various sources"""
+        try:
+            pricing = {}
+
+            # Get price from JSON-LD
+            if json_ld_data.get("offers", {}).get("price"):
+                pricing["current_price"] = int(json_ld_data["offers"]["price"])
+
+            # Extract formatted price text
+            price_elements = soup.find_all(
+                ["strong", "span"], string=re.compile(r"\d+만원")
+            )
+            for element in price_elements:
+                price_text = element.get_text(strip=True)
+                if "만원" in price_text and "price-sum" not in element.get("class", []):
+                    pricing["current_price_text"] = price_text
+                    break
+
+            # Extract market price range
+            market_price = soup.find("strong", class_="price")
+            if market_price:
+                pricing["market_price_range"] = market_price.get_text(strip=True)
+
+            # Extract price confidence indicator
+            price_confidence = soup.find("div", class_="price-range-bar__current-mark")
+            if price_confidence:
+                pricing["market_price_confidence"] = "high"  # Based on styling
+
+            return pricing
+
+        except Exception as e:
+            logger.error(f"Failed to extract pricing info: {str(e)}")
+            return {}
+
+    def _extract_condition_info(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Extract car condition and inspection information"""
+        try:
+            condition = {}
+
+            # Extract mileage analysis
+            mileage_analysis = soup.find("div", class_="km-txt")
+            if mileage_analysis:
+                condition["mileage_analysis"] = mileage_analysis.get_text(strip=True)
+
+            # Extract inspection/diagnosis status
+            diag_elements = soup.find_all(
+                ["div", "span"], string=re.compile(r"진단|인증|검사")
+            )
+            for element in diag_elements:
+                if "진단" in element.get_text():
+                    condition["inspection_status"] = element.get_text(strip=True)
+                    break
+
+            return condition
+
+        except Exception as e:
+            logger.error(f"Failed to extract condition info: {str(e)}")
+            return {}
+
+    def _extract_options_info(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Extract car options and features"""
+        try:
+            options = {
+                "safety_options": [],
+                "convenience_options": [],
+                "exterior_options": [],
+                "interior_options": [],
+                "multimedia_options": [],
+                "other_options": [],
+            }
+
+            # Find options section
+            options_section = soup.find("div", id="divCarOption")
+            if options_section:
+                option_elements = options_section.find_all(["li", "span", "div"])
+                for element in option_elements:
+                    option_text = element.get_text(strip=True)
+                    if option_text and len(option_text) > 2:
+                        # Categorize options based on keywords
+                        if any(
+                            keyword in option_text
+                            for keyword in ["안전", "에어백", "ABS", "ESP"]
+                        ):
+                            options["safety_options"].append(option_text)
+                        elif any(
+                            keyword in option_text
+                            for keyword in ["네비", "오디오", "스피커", "USB"]
+                        ):
+                            options["multimedia_options"].append(option_text)
+                        elif any(
+                            keyword in option_text
+                            for keyword in ["시트", "열선", "가죽", "파워윈도우"]
+                        ):
+                            options["interior_options"].append(option_text)
+                        elif any(
+                            keyword in option_text
+                            for keyword in ["썬루프", "휠", "램프", "범퍼"]
+                        ):
+                            options["exterior_options"].append(option_text)
+                        elif any(
+                            keyword in option_text
+                            for keyword in ["하이패스", "블랙박스", "스마트키"]
+                        ):
+                            options["convenience_options"].append(option_text)
+                        else:
+                            options["other_options"].append(option_text)
+
+            return options
+
+        except Exception as e:
+            logger.error(f"Failed to extract options info: {str(e)}")
+            return {
+                "safety_options": [],
+                "convenience_options": [],
+                "exterior_options": [],
+                "interior_options": [],
+                "multimedia_options": [],
+                "other_options": [],
+            }
+
+    def _extract_seller_info(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Extract seller information"""
+        try:
+            seller = {}
+
+            # Extract seller description
+            seller_desc = soup.find("div", class_="seller-comment")
+            if seller_desc:
+                seller["seller_description"] = seller_desc.get_text(strip=True)
+
+            # Extract seller location
+            location_elements = soup.find_all(
+                ["span", "div"],
+                string=re.compile(
+                    r"인천|서울|부산|대구|대전|광주|울산|경기|강원|충북|충남|전북|전남|경북|경남|제주"
+                ),
+            )
+            for element in location_elements:
+                location_text = element.get_text(strip=True)
+                if any(
+                    city in location_text
+                    for city in ["인천", "서울", "부산", "대구", "대전", "광주", "울산"]
+                ):
+                    seller["location"] = location_text
+                    break
+
+            return seller
+
+        except Exception as e:
+            logger.error(f"Failed to extract seller info: {str(e)}")
+            return {}
+
+    def _extract_basic_info(
+        self, soup: BeautifulSoup, json_ld_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Extract basic car information"""
+        try:
+            basic_info = {}
+
+            # Extract from JSON-LD
+            if json_ld_data:
+                basic_info["title"] = json_ld_data.get("name", "")
+                basic_info["full_name"] = json_ld_data.get("name", "")
+                if json_ld_data.get("brand", {}).get("name"):
+                    basic_info["brand"] = json_ld_data["brand"]["name"]
+
+            # Extract from HTML title
+            title_element = soup.find("title")
+            if title_element:
+                title_text = title_element.get_text(strip=True)
+                if not basic_info.get("title"):
+                    basic_info["title"] = title_text
+
+                # Extract brand and model from title
+                if not basic_info.get("brand"):
+                    if "현대" in title_text:
+                        basic_info["brand"] = "현대"
+                    elif "기아" in title_text:
+                        basic_info["brand"] = "기아"
+                    elif "벤츠" in title_text:
+                        basic_info["brand"] = "벤츠"
+                    elif "BMW" in title_text:
+                        basic_info["brand"] = "BMW"
+
+                # Extract model from title
+                if "벨로스터" in title_text:
+                    basic_info["model"] = "벨로스터"
+                elif "그랜저" in title_text:
+                    basic_info["model"] = "그랜저"
+                elif "아반떼" in title_text:
+                    basic_info["model"] = "아반떼"
+
+            return basic_info
+
+        except Exception as e:
+            logger.error(f"Failed to extract basic info: {str(e)}")
+            return {}
+
+    def _extract_images(self, json_ld_data: Dict[str, Any]) -> List[str]:
+        """Extract car images from JSON-LD data"""
+        try:
+            images = []
+
+            if json_ld_data.get("image"):
+                image_data = json_ld_data["image"]
+                if isinstance(image_data, list):
+                    images = image_data
+                elif isinstance(image_data, str):
+                    images = [image_data]
+
+            return images
+
+        except Exception as e:
+            logger.error(f"Failed to extract images: {str(e)}")
+            return []
+
+    def _extract_tags_badges(self, soup: BeautifulSoup) -> Tuple[List[str], List[str]]:
+        """Extract car tags and badges"""
+        try:
+            tags = []
+            badges = []
+
+            # Extract badges (인증, 진단, etc.)
+            badge_elements = soup.find_all(
+                ["span", "div"], class_=re.compile(r"badge|tag|cert")
+            )
+            for element in badge_elements:
+                badge_text = element.get_text(strip=True)
+                if badge_text and len(badge_text) < 10:  # Short badges
+                    badges.append(badge_text)
+
+            # Extract tags from specific sections
+            tag_elements = soup.find_all(
+                ["span", "div"], string=re.compile(r"실차주|헛걸음보상|무사고|저가격")
+            )
+            for element in tag_elements:
+                tag_text = element.get_text(strip=True)
+                if tag_text and len(tag_text) < 20:  # Reasonable tag length
+                    tags.append(tag_text)
+
+            return tags, badges
+
+        except Exception as e:
+            logger.error(f"Failed to extract tags/badges: {str(e)}")
+            return [], []
+
+    def _extract_description(self, soup: BeautifulSoup) -> str:
+        """Extract car description from seller comments"""
+        try:
+            # Find seller description section
+            desc_elements = soup.find_all(
+                ["div", "p"], string=re.compile(r"설명|소개|차량|상태")
+            )
+            for element in desc_elements:
+                parent = element.parent
+                if (
+                    parent and len(parent.get_text(strip=True)) > 50
+                ):  # Substantial description
+                    return parent.get_text(strip=True)
+
+            # Fallback to any large text block
+            large_text_elements = soup.find_all(
+                ["div", "p"], string=lambda text: text and len(text) > 100
+            )
+            if large_text_elements:
+                return large_text_elements[0].get_text(strip=True)
+
+            return ""
+
+        except Exception as e:
+            logger.error(f"Failed to extract description: {str(e)}")
+            return ""

@@ -198,3 +198,123 @@ class KBDefaultListResponse(BaseModel):
     )
     total_count: int = Field(description="Total listings count")
     meta: Optional[Dict[str, Any]] = None
+
+
+class KBCarSpecification(BaseModel):
+    """Car technical specifications"""
+
+    license_plate: Optional[str] = Field(None, description="License plate number")
+    model_year: Optional[str] = Field(
+        None, description="Model year (e.g., 12년06월(13년형))"
+    )
+    mileage: Optional[str] = Field(None, description="Mileage (e.g., 124,413km)")
+    fuel_type: Optional[str] = Field(None, description="Fuel type (e.g., 가솔린)")
+    transmission: Optional[str] = Field(
+        None, description="Transmission type (e.g., 오토)"
+    )
+    car_class: Optional[str] = Field(None, description="Car class (e.g., 준중형)")
+    engine_displacement: Optional[str] = Field(
+        None, description="Engine displacement (e.g., 1,591cc)"
+    )
+    color: Optional[str] = Field(None, description="Car color (e.g., 흰색)")
+    fuel_efficiency: Optional[str] = Field(None, description="Fuel efficiency rating")
+    drivetrain: Optional[str] = Field(None, description="Drivetrain type")
+    seating_capacity: Optional[str] = Field(None, description="Number of seats")
+
+
+class KBCarPricing(BaseModel):
+    """Car pricing information"""
+
+    current_price: int = Field(description="Current selling price in KRW")
+    current_price_text: str = Field(
+        description="Formatted current price (e.g., 520만원)"
+    )
+    market_price_range: Optional[str] = Field(
+        None, description="Market price range (e.g., 408~607만원)"
+    )
+    market_price_confidence: Optional[str] = Field(
+        None, description="Market price confidence indicator"
+    )
+    residual_value_percentage: Optional[str] = Field(
+        None, description="Residual value percentage"
+    )
+    new_car_price: Optional[str] = Field(None, description="Original new car price")
+
+
+class KBCarCondition(BaseModel):
+    """Car condition and inspection information"""
+
+    accident_history: Optional[str] = Field(None, description="Accident history status")
+    inspection_status: Optional[str] = Field(None, description="KB inspection status")
+    warranty_info: Optional[str] = Field(None, description="Warranty information")
+    mileage_analysis: Optional[str] = Field(None, description="Mileage analysis result")
+    performance_check: Optional[str] = Field(
+        None, description="Performance check status"
+    )
+
+
+class KBCarOptions(BaseModel):
+    """Car options and features"""
+
+    safety_options: List[str] = Field(default=[], description="Safety options")
+    convenience_options: List[str] = Field(
+        default=[], description="Convenience options"
+    )
+    exterior_options: List[str] = Field(default=[], description="Exterior options")
+    interior_options: List[str] = Field(default=[], description="Interior options")
+    multimedia_options: List[str] = Field(default=[], description="Multimedia options")
+    other_options: List[str] = Field(default=[], description="Other options")
+
+
+class KBSellerInfo(BaseModel):
+    """Seller information"""
+
+    seller_name: Optional[str] = Field(None, description="Seller name")
+    seller_type: Optional[str] = Field(None, description="Seller type (딜러, 개인 등)")
+    contact_info: Optional[str] = Field(None, description="Contact information")
+    location: Optional[str] = Field(None, description="Seller location")
+    business_hours: Optional[str] = Field(None, description="Business hours")
+    seller_description: Optional[str] = Field(None, description="Seller description")
+
+
+class KBCarDetailResponse(BaseModel):
+    """Detailed car information response"""
+
+    success: bool = True
+    car_seq: str = Field(description="Car sequence ID")
+
+    # Basic information
+    title: str = Field(description="Car title/name")
+    brand: str = Field(description="Car brand")
+    model: str = Field(description="Car model")
+    full_name: str = Field(description="Full car name")
+
+    # Images
+    images: List[str] = Field(default=[], description="Car images URLs")
+    main_image: Optional[str] = Field(None, description="Main image URL")
+
+    # Technical specifications
+    specifications: KBCarSpecification = Field(description="Technical specifications")
+
+    # Pricing
+    pricing: KBCarPricing = Field(description="Pricing information")
+
+    # Condition
+    condition: KBCarCondition = Field(description="Car condition and inspection")
+
+    # Options
+    options: KBCarOptions = Field(description="Car options and features")
+
+    # Seller
+    seller: KBSellerInfo = Field(description="Seller information")
+
+    # Additional info
+    description: Optional[str] = Field(None, description="Car description")
+    tags: List[str] = Field(default=[], description="Car tags")
+    badges: List[str] = Field(default=[], description="Car badges")
+
+    # URL
+    detail_url: str = Field(description="Detail page URL")
+
+    # Metadata
+    meta: Optional[Dict[str, Any]] = None

@@ -684,3 +684,152 @@ class KBChaChaService:
                     "service": "kbchachacha_search",
                 },
             )
+
+    async def get_car_details(self, car_seq: str) -> Dict[str, Any]:
+        """
+        Get detailed information for a specific car
+
+        Args:
+            car_seq: Car sequence ID (e.g., "27069369")
+
+        Returns:
+            Dict with detailed car information
+        """
+        try:
+            logger.info(f"Fetching car details for carSeq: {car_seq}")
+
+            # Build URL for car detail page
+            url = f"{self.base_url}/public/car/detail.kbc"
+            params = {"carSeq": car_seq}
+
+            # Update session headers for car detail page request
+            detail_headers = {
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+                "Cache-Control": "max-age=0",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-User": "?1",
+                "Upgrade-Insecure-Requests": "1",
+            }
+
+            # Temporarily update headers for this request
+            original_headers = self.session.headers.copy()
+            self.session.headers.update(detail_headers)
+
+            try:
+                response_data = await self._make_request(url, params)
+            finally:
+                # Restore original headers
+                self.session.headers = original_headers
+
+            if not response_data.get("success"):
+                return {
+                    "success": False,
+                    "error": response_data.get(
+                        "error", "Failed to fetch car detail page"
+                    ),
+                    "meta": {
+                        "service": "kbchachacha_car_details",
+                        "car_seq": car_seq,
+                        "url": f"{url}?carSeq={car_seq}",
+                    },
+                }
+
+            # Parse HTML content
+            html_content = response_data["text"]
+
+            # Check if we got a valid car detail page
+            if "차량정보" not in html_content and "판매가격" not in html_content:
+                return {
+                    "success": False,
+                    "error": "Invalid car detail page - car may not exist or be unavailable",
+                    "meta": {
+                        "service": "kbchachacha_car_details",
+                        "car_seq": car_seq,
+                        "html_size": len(html_content),
+                        "url": response_data.get("url"),
+                    },
+                }
+
+            # Parse car detail HTML
+            parsed_data = self.parser.parse_car_detail_html(html_content, car_seq)
+
+            if not parsed_data.get("success"):
+                return {
+                    "success": False,
+                    "error": parsed_data.get("error", "Failed to parse car detail"),
+                    "meta": {
+                        "service": "kbchachacha_car_details",
+                        "car_seq": car_seq,
+                        "parser_error": parsed_data.get("error"),
+                    },
+                }
+
+            # Transform parsed data to match KBCarDetailResponse schema
+            from schemas.kbchachacha import (
+                KBCarSpecification,
+                KBCarPricing,
+                KBCarCondition,
+                KBCarOptions,
+                KBSellerInfo,
+            )
+
+            # Create structured objects from parsed data
+            specifications = KBCarSpecification(**parsed_data.get("specifications", {}))
+            pricing = KBCarPricing(
+                current_price=parsed_data.get("pricing", {}).get("current_price", 0),
+                current_price_text=parsed_data.get("pricing", {}).get(
+                    "current_price_text", ""
+                ),
+                **{
+                    k: v
+                    for k, v in parsed_data.get("pricing", {}).items()
+                    if k not in ["current_price", "current_price_text"]
+                },
+            )
+            condition = KBCarCondition(**parsed_data.get("condition", {}))
+            options = KBCarOptions(**parsed_data.get("options", {}))
+            seller = KBSellerInfo(**parsed_data.get("seller", {}))
+
+            # Build final response
+            return {
+                "success": True,
+                "car_seq": car_seq,
+                "title": parsed_data.get("title", ""),
+                "brand": parsed_data.get("brand", ""),
+                "model": parsed_data.get("model", ""),
+                "full_name": parsed_data.get("full_name", ""),
+                "images": parsed_data.get("images", []),
+                "main_image": parsed_data.get("main_image"),
+                "specifications": specifications,
+                "pricing": pricing,
+                "condition": condition,
+                "options": options,
+                "seller": seller,
+                "description": parsed_data.get("description", ""),
+                "tags": parsed_data.get("tags", []),
+                "badges": parsed_data.get("badges", []),
+                "detail_url": parsed_data.get("detail_url", ""),
+                "meta": {
+                    "service": "kbchachacha_car_details",
+                    "car_seq": car_seq,
+                    "parsing_success": True,
+                    "data_sections": parsed_data.get("meta", {}).get(
+                        "extracted_sections", []
+                    ),
+                    "url": response_data.get("url"),
+                },
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting car details for {car_seq}: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Service error: {str(e)}",
+                "meta": {
+                    "service": "kbchachacha_car_details",
+                    "car_seq": car_seq,
+                    "exception": str(e),
+                },
+            }
