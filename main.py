@@ -41,6 +41,19 @@ from schemas.kbchachacha import (
 )
 from services.kbchachacha_service import KBChaChaService
 
+# Che168 imports
+from schemas.che168 import (
+    Che168SearchResponse,
+    Che168CarDetailResponse,
+    Che168FiltersResponse,
+    Che168SearchFilters,
+    Che168ServiceType,
+    Che168BrandsResponse,
+    Che168ModelsResponse,
+    Che168YearsResponse,
+)
+from services.che168_service import Che168Service
+
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -328,6 +341,8 @@ bike_service = BikeService(proxy_client)
 customs_service = CustomsCalculatorService(proxy_client=None)
 # Initialize KBChaChaCha service WITH proxy for Korean site access
 kbchachacha_service = KBChaChaService(proxy_client)
+# Initialize Che168 service WITH proxy for Chinese site access
+che168_service = Che168Service(proxy_client)
 
 
 @app.on_event("shutdown")
@@ -815,6 +830,8 @@ async def health_check():
         "services": {
             "encar_api": "✅ Active (cars) - with proxy",
             "bobaedream_bikes": "✅ Active (motorcycles) - with proxy",
+            "kbchachacha_korean": "✅ Active (korean cars) - with proxy",
+            "che168_chinese": "✅ Active (chinese cars) - with proxy",
             "tks_customs": "🚀 OPTIMIZED (customs calculator) - direct connection + CAPTCHA caching",
             "parser_engine": "BeautifulSoup4 + lxml",
             "captcha_solver": "CapSolver API integration + background pre-solving",
@@ -2003,6 +2020,390 @@ async def get_kbchachacha_car_details(car_seq: str):
     except Exception as e:
         logger.error(f"Error in KBChaChaCha car details endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ========================================================================================
+# CHE168 ENDPOINTS - Chinese Car Marketplace
+# ========================================================================================
+
+
+@app.get("/api/che168/cars", response_model=Che168SearchResponse)
+async def get_che168_cars(
+    page: int = Query(default=1, description="Page number"),
+    page_size: int = Query(default=10, description="Page size (max 20)", le=20),
+    service: Optional[str] = Query(None, description="Service type filter"),
+):
+    """
+    Get car listings from Che168 Chinese marketplace
+
+    **Basic Parameters:**
+    - **page**: Page number for pagination (default: 1)
+    - **page_size**: Number of cars per page (max: 20, default: 10)
+    - **service**: Service type filter (optional)
+
+    **Service Types:**
+    - `410` - 平台补贴 (Platform Subsidy)
+    - `480` - 直播购 (Live Purchase)
+    - `27` - 4S直卖 (4S Direct Sale)
+    - `430` - 新能源 (New Energy)
+    - `40` - 会员商家 (Member Dealer)
+    - `306` - 店铺 (Shop)
+    - `330` - 分期 (Installment)
+
+    **Example Usage:**
+    - All cars: `/api/che168/cars`
+    - Platform subsidy cars: `/api/che168/cars?service=410`
+    - Electric cars: `/api/che168/cars?service=430`
+    - Live purchase cars (page 2): `/api/che168/cars?page=2&service=480`
+
+    **Response includes:**
+    - Car listings with prices, mileage, location
+    - Car tags (诚信车, 全民砍价, etc.)
+    - Pagination information
+    - Available service filters
+    """
+    try:
+        filters = Che168SearchFilters(
+            pageindex=page,
+            pagesize=page_size,
+            service=service or "50",  # Default service
+        )
+
+        result = await che168_service.search_cars(filters)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch cars from Che168: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in Che168 cars endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/api/che168/search", response_model=Che168SearchResponse)
+async def search_che168_cars(filters: Che168SearchFilters):
+    """
+    Advanced search for Che168 cars with comprehensive filters
+
+    **Search Parameters:**
+    - **pageindex**: Page number (default: 1)
+    - **pagesize**: Page size (default: 10, max: 20)
+    - **service**: Service type filter
+    - **ishideback**: Hide back flag (default: 1)
+    - **srecom**: Recommendation flag (default: 0)
+    - **personalizedpush**: Personalized push (default: 1)
+    - **cid**: Category ID (default: 0)
+    - **scene_no**: Scene number (default: 12)
+
+    **Example Request Body:**
+    ```json
+    {
+        "pageindex": 1,
+        "pagesize": 10,
+        "service": "410",
+        "srecom": 0,
+        "personalizedpush": 1
+    }
+    ```
+
+    **Service Type Values:**
+    - `""` or `"50"` - 全部 (All)
+    - `"410"` - 平台补贴 (Platform Subsidy)
+    - `"480"` - 直播购 (Live Purchase)
+    - `"27"` - 4S直卖 (4S Direct Sale)
+    - `"430"` - 新能源 (New Energy)
+    - `"40"` - 会员商家 (Member Dealer)
+    - `"306"` - 店铺 (Shop)
+    - `"330"` - 分期 (Installment)
+
+    **Returns comprehensive car data:**
+    - Car details (name, price, mileage, year, location)
+    - Engine specifications (displacement, environmental standard)
+    - Car tags and badges
+    - Dealer information
+    - Financing options (down payment)
+    - Pagination and filter information
+    """
+    try:
+        result = await che168_service.search_cars(filters)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to search cars on Che168: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in Che168 search endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/che168/car/{info_id}", response_model=Che168CarDetailResponse)
+async def get_che168_car_detail(info_id: int = Path(..., description="Car info ID")):
+    """
+    Get detailed information for a specific Che168 car
+
+    **Parameters:**
+    - **info_id**: Car information ID (e.g., 55975913)
+
+    **Returns:**
+    Detailed car information including:
+    - Complete car specifications
+    - Pricing and financing details
+    - High-resolution images
+    - Dealer contact information
+    - Car history and condition
+    - Special tags and promotions
+
+    **Example Usage:**
+    - Get Panamera details: `/api/che168/car/55975913`
+    - Use info_id from search results to get full details
+
+    **Data Sources:**
+    - Che168 API with car-specific data
+    - Real-time pricing and availability
+    - Dealer verification status
+    """
+    try:
+        result = await che168_service.get_car_detail(info_id)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch car details for {info_id}: {result.error}",
+            )
+
+        if not result.car:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Car with ID {info_id} not found",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in Che168 car detail endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/che168/filters", response_model=Che168FiltersResponse)
+async def get_che168_filters():
+    """
+    Get available filter options for Che168 search
+
+    **Returns:**
+    Available service type filters and their descriptions:
+
+    **Service Types:**
+    - **全部** (`""` or `"50"`) - All cars
+    - **平台补贴** (`"410"`) - Platform subsidized cars
+    - **直播购** (`"480"`) - Live streaming purchase cars
+    - **4S直卖** (`"27"`) - 4S dealership direct sales
+    - **新能源** (`"430"`) - New energy vehicles (electric/hybrid)
+    - **会员商家** (`"40"`) - Member dealer cars
+    - **店铺** (`"306"`) - Shop cars
+    - **分期** (`"330"`) - Installment financing available
+
+    **Usage:**
+    Use the returned filter values in search requests:
+    - GET `/api/che168/cars?service=410`
+    - POST `/api/che168/search` with service type in body
+
+    **Filter Information:**
+    Each filter includes:
+    - Title and description
+    - Service value for API requests
+    - Visual styling information
+    - Badge and icon details
+    """
+    try:
+        result = await che168_service.get_filters()
+
+        if not result.success:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch filters from Che168: {result.meta.get('error', 'Unknown error')}",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in Che168 filters endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/che168/test")
+async def test_che168_integration():
+    """
+    Test Che168 integration and service health
+
+    **Returns:**
+    - Service status and connectivity
+    - Sample car data (if successful)
+    - Error details (if failed)
+    - Session and proxy information
+
+    **Usage:**
+    Use this endpoint to verify Che168 integration is working properly
+    before making actual search requests.
+    """
+    try:
+        # Test basic connectivity with minimal search
+        filters = Che168SearchFilters(pageindex=1, pagesize=1)
+        result = await che168_service.search_cars(filters)
+
+        session_info = che168_service.get_session_info()
+
+        return {
+            "status": "healthy" if result.success else "error",
+            "che168_api": {
+                "success": result.success,
+                "total_cars": result.total_count if result.success else 0,
+                "sample_car": result.cars[0].carname if result.success and result.cars else None,
+                "service_filters": len(result.service_filters) if result.success else 0,
+                "error": result.meta.get("error") if not result.success else None,
+            },
+            "session_info": session_info,
+            "proxy_status": {
+                "enabled": che168_service.proxy_client is not None,
+                "proxy_name": "Decodo Proxy (Korean)" if che168_service.proxy_client else "Direct",
+            },
+            "service": "che168_chinese_marketplace",
+            "version": "1.0.0",
+        }
+
+    except Exception as e:
+        logger.error(f"Error in Che168 test endpoint: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "service": "che168_chinese_marketplace",
+            "version": "1.0.0",
+        }
+
+
+# Che168 Brand/Model/Year Filter Endpoints
+@app.get("/api/che168/brands", response_model=Che168BrandsResponse)
+async def get_che168_brands():
+    """
+    Get all available car brands from Che168
+
+    Returns:
+        Che168BrandsResponse: List of all car brands with their details
+
+    Example:
+        - GET `/api/che168/brands`
+
+    Response includes:
+        - Brand ID, name, and icon
+        - Number of cars on sale for each brand
+        - Pinyin abbreviation for Chinese brands
+    """
+    try:
+        logger.info(f"Getting Che168 brands")
+
+        result = await che168_service.get_brands()
+
+        logger.info(f"Successfully retrieved {result.total_brands} brands")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting Che168 brands: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get brands: {str(e)}"
+        )
+
+
+@app.get("/api/che168/brands/{brand_id}/models", response_model=Che168ModelsResponse)
+async def get_che168_models(brand_id: int = Path(..., description="Brand ID")):
+    """
+    Get all available models for a specific brand from Che168
+
+    Args:
+        brand_id: The brand ID to get models for
+
+    Returns:
+        Che168ModelsResponse: List of models for the specified brand
+
+    Example:
+        - GET `/api/che168/brands/33/models` (BMW models)
+        - GET `/api/che168/brands/1/models` (Audi models)
+
+    Response includes:
+        - Model name and series ID
+        - Available specifications for each model
+        - Filter parameters for further refinement
+    """
+    try:
+        logger.info(f"Getting Che168 models for brand {brand_id}")
+
+        result = await che168_service.get_models(brand_id)
+
+        logger.info(f"Successfully retrieved {result.total_models} models for brand {brand_id}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting Che168 models for brand {brand_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get models for brand {brand_id}: {str(e)}"
+        )
+
+
+@app.get("/api/che168/brands/{brand_id}/models/{series_id}/years", response_model=Che168YearsResponse)
+async def get_che168_years(
+    brand_id: int = Path(..., description="Brand ID"),
+    series_id: int = Path(..., description="Series (model) ID")
+):
+    """
+    Get all available years for a specific brand and model from Che168
+
+    Args:
+        brand_id: The brand ID
+        series_id: The series (model) ID to get years for
+
+    Returns:
+        Che168YearsResponse: List of years for the specified brand and model
+
+    Example:
+        - GET `/api/che168/brands/33/models/692/years` (BMW 3 Series years)
+        - GET `/api/che168/brands/1/models/59/years` (Audi A4 years)
+
+    Response includes:
+        - Year title (e.g., "2025款", "2024款")
+        - Series year ID for filtering
+        - Available specifications for each year
+        - Filter parameters for search refinement
+    """
+    try:
+        logger.info(f"Getting Che168 years for brand {brand_id}, series {series_id}")
+
+        result = await che168_service.get_years(brand_id, series_id)
+
+        logger.info(f"Successfully retrieved {result.total_years} years for brand {brand_id}, series {series_id}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting Che168 years for brand {brand_id}, series {series_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get years for brand {brand_id}, series {series_id}: {str(e)}"
+        )
 
 
 if __name__ == "__main__":
