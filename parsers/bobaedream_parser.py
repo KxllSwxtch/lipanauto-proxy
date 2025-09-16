@@ -849,18 +849,53 @@ class BobaeDreamBikeParser:
         return payment_methods
 
     def _extract_images(self, soup: BeautifulSoup) -> List[str]:
-        """Extract all bike images"""
+        """Extract images for the specific bike only (filter out other bikes' photos)"""
         images = []
 
         try:
-            # Find all bike images
-            image_links = soup.find_all(
+            # First, get the main image to extract the bike's base ID
+            main_image_url = self._extract_main_image(soup)
+            bike_base_id = None
+
+            if main_image_url:
+                # Extract base ID from main image URL (e.g., "cb1739316488" from "cb1739316488_1.jpg")
+                match = re.search(r'/(cb\d+)_\d+\.jpg', main_image_url)
+                if match:
+                    bike_base_id = match.group(1)
+                    logger.info(f"Extracted bike base ID from main image: {bike_base_id}")
+                else:
+                    logger.warning(f"Could not extract base ID from main image: {main_image_url}")
+            else:
+                logger.warning("Could not find main image, will try to extract base ID from any image")
+
+            # Find ALL images on the page that match our domain pattern
+            all_image_links = soup.find_all(
                 "img", src=re.compile(r"file4\.bobaedream\.co\.kr/direct_bike")
             )
 
-            for img in image_links:
+            logger.info(f"Found {len(all_image_links)} total bike images on page")
+
+            # If we couldn't get base ID from main image, extract it from the first valid image
+            if not bike_base_id and all_image_links:
+                for img in all_image_links[:5]:  # Check first 5 images
+                    src = img.get("src")
+                    if src and "file4.bobaedream.co.kr/direct_bike" in src:
+                        if src.startswith("//"):
+                            src = "https:" + src
+                        elif not src.startswith("http"):
+                            src = urljoin(self.BASE_URL, src)
+
+                        # Try to extract base ID
+                        match = re.search(r'/(cb\d+)_\d+\.jpg', src)
+                        if match:
+                            bike_base_id = match.group(1)
+                            logger.info(f"Extracted bike base ID from first image: {bike_base_id}")
+                            break
+
+            # Process found images with base ID filtering
+            for img in all_image_links:
                 src = img.get("src")
-                if src:
+                if src and self._is_valid_bike_image(img, src):
                     # Convert to full URL if needed
                     if src.startswith("//"):
                         src = "https:" + src
@@ -871,13 +906,101 @@ class BobaeDreamBikeParser:
                     if "_s1.jpg" in src:
                         src = src.replace("_s1.jpg", ".jpg")
 
-                    if src not in images:
-                        images.append(src)
+                    # CRITICAL FILTER: Only include images that belong to this specific bike
+                    if bike_base_id:
+                        if self._belongs_to_same_bike(src, bike_base_id):
+                            if src not in images:
+                                images.append(src)
+                                logger.debug(f"Added bike image {len(images)}: {src}")
+                        else:
+                            logger.debug(f"Filtered out non-matching image: {src}")
+                    else:
+                        # Fallback if we can't extract base ID - be very restrictive
+                        if src not in images:
+                            images.append(src)
+                            logger.debug(f"Added fallback image {len(images)}: {src}")
+
+            logger.info(f"Filtered images: {len(images)} images found for bike with base ID: {bike_base_id}")
 
         except Exception as e:
-            logger.warning(f"Failed to extract images: {str(e)}")
+            logger.error(f"Failed to extract images: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
 
         return images
+
+    def _belongs_to_same_bike(self, image_url: str, bike_base_id: str) -> bool:
+        """Check if an image URL belongs to the same bike based on base ID pattern"""
+        try:
+            # Extract base ID from image URL
+            match = re.search(r'/(cb\d+)_\d+\.jpg', image_url)
+            if match:
+                image_base_id = match.group(1)
+                return image_base_id == bike_base_id
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking image ownership: {str(e)}")
+            return False
+
+    def _is_valid_bike_image(self, img_element, src: str) -> bool:
+        """Validate if an image belongs to the current bike (not ads or related bikes)"""
+        try:
+            # Check 1: Skip very small images (likely thumbnails or icons)
+            width = img_element.get("width")
+            height = img_element.get("height")
+            if width and height:
+                try:
+                    w, h = int(width), int(height)
+                    if w < 50 or h < 50:  # Skip tiny images
+                        return False
+                except (ValueError, TypeError):
+                    pass
+
+            # Check 2: Skip images that are clearly ads or banners
+            parent = img_element.find_parent()
+            if parent:
+                parent_text = parent.get_text(strip=True).lower()
+                # Skip if parent contains ad-related text
+                ad_keywords = ["광고", "배너", "banner", "ad", "추천", "관련"]
+                if any(keyword in parent_text for keyword in ad_keywords):
+                    return False
+
+                # Skip if parent has ad-related attributes
+                parent_attrs = str(parent.attrs).lower()
+                if "ad" in parent_attrs or "banner" in parent_attrs:
+                    return False
+
+            # Check 3: Skip images in navigation or footer areas
+            img_parent_chain = []
+            current = img_element.parent
+            level = 0
+            while current and level < 5:  # Check up to 5 levels up
+                if hasattr(current, 'get_text'):
+                    img_parent_chain.append(current.get_text(strip=True).lower())
+                if hasattr(current, 'attrs'):
+                    img_parent_chain.append(str(current.attrs).lower())
+                current = current.parent
+                level += 1
+
+            parent_chain_text = " ".join(img_parent_chain)
+            nav_keywords = ["navigation", "footer", "header", "menu", "네비", "하단", "상단"]
+            if any(keyword in parent_chain_text for keyword in nav_keywords):
+                return False
+
+            # Check 4: Prefer images that are in the main content area
+            # Look for images that are children of table cells with content
+            td_parent = img_element.find_parent("td")
+            if td_parent:
+                td_text = td_parent.get_text(strip=True)
+                # If TD has substantial content, it's likely the main content area
+                if len(td_text) > 100:  # Substantial content suggests main area
+                    return True
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"Error validating image: {str(e)}")
+            return True  # Default to including the image if validation fails
 
     def _extract_main_image(self, soup: BeautifulSoup) -> Optional[str]:
         """Extract main bike image"""

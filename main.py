@@ -2,6 +2,7 @@ import requests
 import asyncio
 import random
 import time
+import re
 from typing import Dict, List, Optional, Union, Annotated
 from fastapi import FastAPI, Query, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,9 +20,17 @@ from schemas.bike_filters import (
 )
 from services.bike_service import BikeService
 
-# Customs calculator imports
+# Customs calculator imports (TKS - removed, replaced with VLB)
 from schemas.customs import CustomsCalculationRequest, CustomsCalculationResponse
-from services.customs_service import CustomsCalculatorService
+
+# VLB Customs imports
+from schemas.vlb_customs import (
+    VLBCustomsRequest,
+    VLBCustomsResponse,
+    TurnkeyPriceResponse,
+    BikeCustomsRequest
+)
+from services.vlb_customs_service import VLBCustomsService
 
 # KBChaChaCha imports
 from schemas.kbchachacha import (
@@ -337,8 +346,8 @@ proxy_client = EncarProxyClient()
 
 # Initialize services
 bike_service = BikeService(proxy_client)
-# Initialize customs service WITHOUT proxy for faster direct requests
-customs_service = CustomsCalculatorService(proxy_client=None)
+# Initialize VLB customs service WITHOUT proxy for direct access (replaces TKS)
+vlb_customs_service = VLBCustomsService(proxy_client=None)
 # Initialize KBChaChaCha service WITH proxy for Korean site access
 kbchachacha_service = KBChaChaService(proxy_client)
 # Initialize Che168 service WITH proxy for Chinese site access
@@ -2404,6 +2413,281 @@ async def get_che168_years(
             status_code=500,
             detail=f"Failed to get years for brand {brand_id}, series {series_id}: {str(e)}"
         )
+
+
+# =============================================================================
+# VLB CUSTOMS CALCULATION ENDPOINTS
+# =============================================================================
+
+
+@app.post("/api/bikes/{bike_id}/customs", response_model=VLBCustomsResponse)
+async def calculate_bike_customs(
+    bike_id: str,
+    request: Optional[BikeCustomsRequest] = None
+):
+    """
+    Calculate customs duties for a specific bike using VLB broker
+
+    Automatically extracts bike year and engine displacement from bike data,
+    then calculates Russian customs duties.
+
+    **Parameters:**
+    - **bike_id**: Unique bike identifier
+    - **force_refresh**: Optional flag to force refresh cached customs data
+
+    **Returns:**
+    - Detailed customs breakdown (processing fee, duty, VAT)
+    - Total customs cost in RUB
+    - Exchange rates used
+    - Cache information
+    """
+    try:
+        # Get bike details first
+        bike_detail_response = await bike_service.get_bike_details(bike_id)
+
+        if not bike_detail_response.get("success") or not bike_detail_response.get("bike"):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Bike {bike_id} not found"
+            )
+
+        bike = bike_detail_response["bike"]
+
+        # Extract year from bike data
+        year = None
+        if bike.year:
+            year_match = re.search(r'(\d{4})', bike.year)
+            if year_match:
+                year = int(year_match.group(1))
+
+        if not year:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not extract year from bike data: {bike.year}"
+            )
+
+        # Extract engine displacement
+        engine_volume = None
+        if bike.engine_cc:
+            # Extract numeric part from strings like "600cc" or "600cc(2종 소형 면허 필요)"
+            cc_match = re.search(r'(\d+)', bike.engine_cc)
+            if cc_match:
+                engine_volume = int(cc_match.group(1))
+
+        if not engine_volume:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not extract engine displacement from bike data: {bike.engine_cc}"
+            )
+
+        # Parse bike price
+        bike_price_krw = None
+        if bike.price and bike.price != "가격문의":
+            try:
+                # Handle numeric format like "1150" (representing 1150 * 10,000 KRW)
+                if bike.price.isdigit():
+                    bike_price_krw = int(bike.price) * 10000
+                else:
+                    # Try to extract numbers from any format
+                    price_match = re.search(r'(\d+(?:,\d{3})*)', bike.price)
+                    if price_match:
+                        price_str = price_match.group(1).replace(',', '')
+                        bike_price_krw = int(price_str) * 10000
+            except (ValueError, AttributeError):
+                pass
+
+        if not bike_price_krw:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not extract price from bike data: {bike.price}"
+            )
+
+        logger.info(f"Calculating customs for bike {bike_id}: {year} year, {engine_volume}cc, {bike_price_krw} KRW")
+
+        # Create VLB customs request
+        vlb_request = VLBCustomsRequest(
+            price=bike_price_krw,
+            currency="KRW",
+            year=year,
+            engine_volume=engine_volume
+        )
+
+        force_refresh = request.force_refresh if request else False
+        result = await vlb_customs_service.calculate_customs(vlb_request, force_refresh)
+
+        logger.info(f"Customs calculation result for bike {bike_id}: success={result.success}")
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error calculating customs for bike {bike_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to calculate customs for bike {bike_id}: {str(e)}"
+        )
+
+
+@app.get("/api/bikes/{bike_id}/turnkey-price", response_model=TurnkeyPriceResponse)
+async def calculate_bike_turnkey_price(bike_id: str):
+    """
+    Calculate complete turnkey price for bike import to Russia
+
+    Includes:
+    - Base bike price + 10% markup
+    - Documents fee (60,000 RUB)
+    - Korea logistics (520,000 KRW converted to RUB)
+    - Vladivostok logistics ($550 converted to RUB)
+    - Packaging (500,000 KRW converted to RUB)
+    - Customs duties (calculated via VLB broker)
+
+    **Parameters:**
+    - **bike_id**: Unique bike identifier
+
+    **Returns:**
+    - Complete cost breakdown with all components
+    - Total turnkey price in RUB
+    - Customs breakdown details
+    - Exchange rates used
+    """
+    try:
+        # First get bike customs calculation
+        customs_request = BikeCustomsRequest(force_refresh=False)
+        customs_response = await calculate_bike_customs(bike_id, customs_request)
+
+        if not customs_response.success or not customs_response.customs:
+            return TurnkeyPriceResponse(
+                success=False,
+                bike_id=bike_id,
+                error="Failed to calculate customs duties"
+            )
+
+        # Get bike details for price
+        bike_detail_response = await bike_service.get_bike_details(bike_id)
+        if not bike_detail_response.get("success") or not bike_detail_response.get("bike"):
+            return TurnkeyPriceResponse(
+                success=False,
+                bike_id=bike_id,
+                error="Bike not found"
+            )
+
+        bike = bike_detail_response["bike"]
+
+        # Parse bike price
+        bike_price_krw = None
+        if bike.price and bike.price != "가격문의":
+            try:
+                if bike.price.isdigit():
+                    bike_price_krw = int(bike.price) * 10000
+                else:
+                    price_match = re.search(r'(\d+(?:,\d{3})*)', bike.price)
+                    if price_match:
+                        price_str = price_match.group(1).replace(',', '')
+                        bike_price_krw = int(price_str) * 10000
+            except (ValueError, AttributeError):
+                pass
+
+        if not bike_price_krw:
+            return TurnkeyPriceResponse(
+                success=False,
+                bike_id=bike_id,
+                error="Could not parse bike price"
+            )
+
+        # Use exchange rates from customs response or fallback rates
+        if customs_response.currency_rates and 'KRW' in customs_response.currency_rates:
+            # VLB rate format: "59,8198 руб. за 1000 KRW"
+            krw_rate_text = customs_response.currency_rates['KRW']
+            krw_match = re.search(r'(\d+,?\d*)', krw_rate_text.replace(',', '.'))
+            krw_to_rub_rate = float(krw_match.group(1)) / 1000 if krw_match else 0.06  # fallback
+        else:
+            krw_to_rub_rate = 0.06  # Fallback rate: 60 RUB per 1000 KRW
+
+        if customs_response.currency_rates and 'USD' in customs_response.currency_rates:
+            usd_rate_text = customs_response.currency_rates['USD']
+            usd_match = re.search(r'(\d+,?\d*)', usd_rate_text.replace(',', '.'))
+            usd_to_rub_rate = float(usd_match.group(1)) if usd_match else 90.0  # fallback
+        else:
+            usd_to_rub_rate = 90.0  # Fallback rate
+
+        # Calculate turnkey price components
+        components = vlb_customs_service.calculate_turnkey_price(
+            bike_price_krw,
+            customs_response.customs,
+            krw_to_rub_rate,
+            usd_to_rub_rate
+        )
+
+        # Calculate total turnkey price
+        total_turnkey_price = (
+            components.base_price_rub +
+            components.markup_10_percent +
+            components.documents_fee +
+            components.korea_logistics_rub +
+            components.vladivostok_logistics_rub +
+            components.packaging_rub +
+            components.customs_total
+        )
+
+        logger.info(f"Turnkey price for bike {bike_id}: {total_turnkey_price} RUB")
+
+        return TurnkeyPriceResponse(
+            success=True,
+            bike_id=bike_id,
+            components=components,
+            total_turnkey_price_rub=total_turnkey_price,
+            customs_breakdown=customs_response.customs,
+            exchange_rates=customs_response.currency_rates,
+            cached=customs_response.cached
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error calculating turnkey price for bike {bike_id}: {str(e)}")
+        return TurnkeyPriceResponse(
+            success=False,
+            bike_id=bike_id,
+            error=f"Failed to calculate turnkey price: {str(e)}"
+        )
+
+
+@app.get("/api/vlb-customs/stats")
+async def get_vlb_customs_stats():
+    """
+    Get VLB customs service performance statistics
+
+    Returns cache hit rates, API success rates, and other metrics
+    """
+    try:
+        stats = vlb_customs_service.get_service_stats()
+        return JSONResponse(content={
+            "success": True,
+            "stats": stats,
+            "service": "VLB Customs Service",
+            "version": "1.0.0"
+        })
+    except Exception as e:
+        logger.error(f"Error getting VLB customs stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/vlb-customs/clear-cache")
+async def clear_vlb_customs_cache():
+    """
+    Clear VLB customs cache
+
+    Forces fresh customs calculations for all subsequent requests
+    """
+    try:
+        vlb_customs_service.clear_cache()
+        return JSONResponse(content={
+            "success": True,
+            "message": "VLB customs cache cleared successfully"
+        })
+    except Exception as e:
+        logger.error(f"Error clearing VLB customs cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
