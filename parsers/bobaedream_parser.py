@@ -461,11 +461,12 @@ class BobaeDreamBikeParser:
                     price_match = re.search(pattern, row_text)
                     if price_match:
                         if len(price_match.groups()) == 2:
-                            info["price"] = (
-                                f"{price_match.group(1)},{price_match.group(2)}만원"
-                            )
+                            # Extract numeric value: "1,150만원" -> "1150"
+                            price_value = f"{price_match.group(1)}{price_match.group(2)}"
+                            info["price"] = price_value
                         else:
-                            info["price"] = f"{price_match.group(1)}만원"
+                            # Extract numeric value: "1150만원" -> "1150"
+                            info["price"] = price_match.group(1)
                         break
 
             if not info.get("seller_type"):
@@ -590,7 +591,7 @@ class BobaeDreamBikeParser:
             return "Unknown Model"
 
     def _extract_price(self, soup: BeautifulSoup) -> str:
-        """Extract selling price"""
+        """Extract selling price and return normalized numeric value"""
         try:
             # Look for price in the specifications table
             price_cell = soup.find("td", string="판매가격")
@@ -599,13 +600,43 @@ class BobaeDreamBikeParser:
                 if price_cell:
                     price_element = price_cell.find(class_="do_red_b1")
                     if price_element:
-                        return price_element.get_text(strip=True)
+                        price_text = price_element.get_text(strip=True)
+                        return self._normalize_price(price_text)
 
             return "가격문의"
 
         except Exception as e:
             logger.warning(f"Failed to extract price: {str(e)}")
             return "가격문의"
+
+    def _normalize_price(self, price_text: str) -> str:
+        """Normalize Korean price format to numeric value"""
+        try:
+            # Handle Korean price format like "1,150만원" or "1150만원"
+            if "만원" in price_text:
+                # Extract numeric part before "만원"
+                numeric_part = price_text.replace("만원", "").replace(",", "").strip()
+                if numeric_part.isdigit():
+                    return numeric_part
+                else:
+                    # Try to extract numbers with regex
+                    import re
+                    match = re.search(r"(\d{1,4}(?:,?\d{3})*)", price_text)
+                    if match:
+                        return match.group(1).replace(",", "")
+
+            # If no "만원" found, try to extract any numeric value
+            import re
+            match = re.search(r"(\d+(?:,\d{3})*)", price_text)
+            if match:
+                return match.group(1).replace(",", "")
+
+            # If no numbers found, return original text (like "가격문의")
+            return price_text
+
+        except Exception as e:
+            logger.warning(f"Failed to normalize price '{price_text}': {str(e)}")
+            return price_text
 
     def _extract_specifications(self, soup: BeautifulSoup) -> Dict[str, Optional[str]]:
         """Extract technical specifications from the detail table"""
