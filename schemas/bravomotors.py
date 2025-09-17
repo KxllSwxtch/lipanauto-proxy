@@ -97,7 +97,7 @@ class BravoMotorsCarDetailResponse(BaseModel):
 class TranslationRequest(BaseModel):
     """Translation request model"""
     text: str = Field(..., description="Text to translate")
-    target_language: str = Field(default="en", description="Target language code")
+    target_language: str = Field(default="ru", description="Target language code")
     source_language: str = Field(default="zh-cn", description="Source language code")
     type: str = Field(default="analysis", description="Translation type")
 

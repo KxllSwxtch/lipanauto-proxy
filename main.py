@@ -2038,7 +2038,7 @@ async def get_kbchachacha_car_details(car_seq: str):
 async def get_bravomotors_cars(
     page: int = Query(default=1, description="Page number"),
     page_size: int = Query(default=20, description="Page size (max 50)", le=50),
-    translate: bool = Query(default=True, description="Auto-translate Chinese content to English"),
+    translate: bool = Query(default=True, description="Auto-translate Chinese content to Russian"),
 ):
     """
     Get car listings from BravoMotors Chinese marketplace
@@ -2046,7 +2046,7 @@ async def get_bravomotors_cars(
     **Basic Parameters:**
     - **page**: Page number for pagination (default: 1)
     - **page_size**: Number of cars per page (max: 50, default: 20)
-    - **translate**: Auto-translate Chinese content to English (default: true)
+    - **translate**: Auto-translate Chinese content to Russian (default: true)
 
     **Example Usage:**
     - All cars: `/api/bravomotors/cars`
@@ -2143,14 +2143,14 @@ async def search_bravomotors_cars(filters: BravoMotorsSearchFilters):
 @app.get("/api/bravomotors/car/{car_id}", response_model=BravoMotorsCarDetailResponse)
 async def get_bravomotors_car_detail(
     car_id: str = Path(..., description="Car ID"),
-    translate: bool = Query(default=True, description="Auto-translate Chinese content")
+    translate: bool = Query(default=True, description="Auto-translate Chinese content to Russian")
 ):
     """
     Get detailed information for a specific BravoMotors car
 
     **Parameters:**
     - **car_id**: Car identifier (e.g., "bm_123456")
-    - **translate**: Auto-translate Chinese content to English (default: true)
+    - **translate**: Auto-translate Chinese content to Russian (default: true)
 
     **Returns:**
     Detailed car information including:
@@ -2270,7 +2270,7 @@ async def test_bravomotors_integration():
             "translation_service": {
                 "enabled": True,
                 "api_url": "https://tr.habsidev.com/api/v1/translate",
-                "auto_translate": "Chinese to English",
+                "auto_translate": "Chinese to Russian",
             },
             "proxy_status": {
                 "enabled": bravomotors_service.proxy_client is not None,
@@ -2294,11 +2294,11 @@ async def test_bravomotors_integration():
 @app.post("/api/translate", response_model=TranslationResponse)
 async def translate_text(request: TranslationRequest):
     """
-    Translate Chinese text to target language (English/Russian)
+    Translate Chinese text to target language (Russian/English)
 
     **Parameters:**
     - **text**: Text to translate (required)
-    - **target_language**: Target language code (default: "en")
+    - **target_language**: Target language code (default: "ru")
     - **source_language**: Source language code (default: "zh-cn")
     - **type**: Translation type (default: "analysis")
 
@@ -2306,7 +2306,7 @@ async def translate_text(request: TranslationRequest):
     ```json
     {
         "text": "奔驰GLE轿跑 2022款 GLE 350 4MATIC 轿跑SUV 时尚型",
-        "target_language": "en",
+        "target_language": "ru",
         "source_language": "zh-cn",
         "type": "analysis"
     }
@@ -2314,8 +2314,8 @@ async def translate_text(request: TranslationRequest):
 
     **Supported Languages:**
     - **zh-cn**: Chinese (Simplified)
+    - **ru**: Russian (default)
     - **en**: English
-    - **ru**: Russian
 
     **Returns:**
     - Original and translated text
@@ -2324,7 +2324,7 @@ async def translate_text(request: TranslationRequest):
 
     **Usage:**
     Perfect for translating car names, specifications,
-    and other Chinese automotive content to English or Russian.
+    and other Chinese automotive content to Russian or English.
     """
     try:
         result = await bravomotors_service.translate_text(request)

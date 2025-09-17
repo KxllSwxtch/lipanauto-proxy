@@ -281,7 +281,7 @@ class BravoMotorsService:
                 if car.title and not car.title_translated:
                     translation_request = TranslationRequest(
                         text=car.title,
-                        target_language="en",
+                        target_language="ru",
                         source_language="zh-cn",
                         type="analysis"
                     )
@@ -315,7 +315,7 @@ class BravoMotorsService:
                     if isinstance(value, str) and value.strip():
                         translation_request = TranslationRequest(
                             text=f"{key}: {value}",
-                            target_language="en",
+                            target_language="ru",
                             source_language="zh-cn",
                             type="analysis"
                         )
