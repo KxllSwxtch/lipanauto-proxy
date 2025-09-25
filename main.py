@@ -3,6 +3,7 @@ import asyncio
 import random
 import time
 import re
+from datetime import datetime
 from typing import Dict, List, Optional, Union, Annotated
 from fastapi import FastAPI, Query, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,7 +51,7 @@ from schemas.kbchachacha import (
 )
 from services.kbchachacha_service import KBChaChaService
 
-# BravoMotors imports
+# BravoMotors imports (deprecated - replaced by che168)
 from schemas.bravomotors import (
     BravoMotorsSearchResponse,
     BravoMotorsCarDetailResponse,
@@ -58,8 +59,15 @@ from schemas.bravomotors import (
     BravoMotorsSearchFilters,
     TranslationRequest,
     TranslationResponse,
+    # Che168 schemas
+    Che168SearchResponse,
+    Che168CarDetailResponse,
+    Che168FiltersResponse,
+    Che168SearchFilters,
+    Che168BrandsResponse,
 )
 from services.bravomotors_service import BravoMotorsService
+from services.che168_service import Che168Service
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -350,6 +358,7 @@ vlb_customs_service = VLBCustomsService(proxy_client=None)
 kbchachacha_service = KBChaChaService(proxy_client)
 # Initialize BravoMotors service WITH proxy for Chinese site access
 bravomotors_service = BravoMotorsService(proxy_client)
+che168_service = Che168Service(proxy_client)
 
 
 @app.on_event("shutdown")
@@ -839,6 +848,7 @@ async def health_check():
             "bobaedream_bikes": "✅ Active (motorcycles) - with proxy",
             "kbchachacha_korean": "✅ Active (korean cars) - with proxy",
             "bravomotors_chinese": "✅ Active (chinese cars via bravomotors) - with proxy",
+            "che168_chinese": "✅ Active (chinese cars via che168.com) - with proxy",
             "tks_customs": "🚀 OPTIMIZED (customs calculator) - direct connection + CAPTCHA caching",
             "parser_engine": "BeautifulSoup4 + lxml",
             "captcha_solver": "CapSolver API integration + background pre-solving",
@@ -2334,6 +2344,336 @@ async def translate_text(request: TranslationRequest):
     except Exception as e:
         logger.error(f"Error in translation endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
+
+
+# =============================================================================
+# CHE168 CHINESE CARS ENDPOINTS (NEW IMPLEMENTATION)
+# =============================================================================
+
+
+@app.get("/api/che168/brands", response_model=Che168BrandsResponse)
+async def get_che168_brands():
+    """
+    Get all available car brands from Che168 Chinese marketplace
+
+    **Response Format:**
+    ```json
+    {
+      "returncode": 0,
+      "message": "Success",
+      "result": {
+        "hotbrand": [
+          {
+            "bid": 15,
+            "name": "宝马",
+            "py": "baoma",
+            "icon": "https://car0.autoimg.cn/logo/150/15.png",
+            "on_sale_num": 12534
+          }
+        ],
+        "allbrand": [...]
+      }
+    }
+    ```
+
+    **Use Cases:**
+    - Populate brand dropdown in search form
+    - Show popular/hot brands separately
+    - Get complete brand catalog for filtering
+    """
+    try:
+        result = await che168_service.get_brands()
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in che168 brands endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Brands fetch failed: {str(e)}")
+
+
+@app.post("/api/che168/search", response_model=Che168SearchResponse)
+async def search_che168_cars(filters: Che168SearchFilters):
+    """
+    Search Chinese cars with advanced filtering on Che168
+
+    **Request Body Example:**
+    ```json
+    {
+      "pageindex": 1,
+      "pagesize": 12,
+      "brandid": 15,
+      "price": "15-20",
+      "agerange": "3-5",
+      "mileage": "5-10",
+      "fueltype": 1,
+      "displacement": "1.6-2.0"
+    }
+    ```
+
+    **Response Format:**
+    ```json
+    {
+      "returncode": 0,
+      "message": "Success",
+      "cars": [
+        {
+          "infoid": 123456,
+          "carname": "宝马X3",
+          "price": "25.8",
+          "price_rub": 388032.0,
+          "firstregyear": "2020",
+          "mileage": "3.2万公里",
+          "imageurl": "https://..."
+        }
+      ],
+      "total_count": 1250,
+      "current_page": 1,
+      "page_count": 105,
+      "success": true
+    }
+    ```
+
+    **Key Features:**
+    - Advanced filtering (brand, price, age, mileage, fuel type)
+    - Automatic CNY to RUB price conversion
+    - Pagination support
+    - Filter cascade (brand → model → year)
+    """
+    try:
+        result = await che168_service.search_cars(filters)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in che168 search endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Car search failed: {str(e)}")
+
+
+@app.get("/api/che168/car/{info_id}", response_model=Che168CarDetailResponse)
+async def get_che168_car_detail(info_id: int):
+    """
+    Get detailed specifications for a specific car from Che168
+
+    **Parameters:**
+    - `info_id`: Car listing ID from search results
+
+    **Example Request:**
+    ```
+    GET /api/che168/car/123456
+    ```
+
+    **Response Format:**
+    ```json
+    {
+      "returncode": 0,
+      "message": "Success",
+      "result": [
+        {
+          "title": "基本信息",
+          "data": [
+            {
+              "name": "品牌",
+              "content": "宝马"
+            },
+            {
+              "name": "车系",
+              "content": "宝马X3"
+            }
+          ]
+        }
+      ],
+      "success": true
+    }
+    ```
+
+    **Use Cases:**
+    - Display detailed car specifications
+    - Show technical parameters
+    - Get comprehensive car information for import calculations
+    """
+    try:
+        result = await che168_service.get_car_detail(info_id)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in che168 car detail endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Car detail fetch failed: {str(e)}")
+
+
+@app.get("/api/che168/filters", response_model=Che168FiltersResponse)
+async def get_che168_filters():
+    """
+    Get all available filter options for Che168 search
+
+    **Response Format:**
+    ```json
+    {
+      "brands": [...],
+      "price_ranges": [
+        {"value": "15-20", "label": "15-20万元"}
+      ],
+      "age_ranges": [
+        {"value": "3-5", "label": "3-5年"}
+      ],
+      "fuel_types": [
+        {"id": 1, "name": "汽油", "label": "Бензин"}
+      ],
+      "success": true
+    }
+    ```
+
+    **Use Cases:**
+    - Build dynamic filter UI components
+    - Populate filter dropdowns and ranges
+    - Show localized filter labels (Russian translation)
+    """
+    try:
+        result = await che168_service.get_filters()
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in che168 filters endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Filters fetch failed: {str(e)}")
+
+
+@app.get("/api/che168/models/{brand_id}", response_model=Che168SearchResponse)
+async def get_che168_models(brand_id: int):
+    """
+    Get available models for a specific brand (cascading filter)
+
+    **Parameters:**
+    - `brand_id`: Brand ID from brands endpoint
+
+    **Example:**
+    ```
+    GET /api/che168/models/15  # Get BMW models
+    ```
+
+    **Response:**
+    Search response with available models in filters section
+
+    **Use Cases:**
+    - Implement brand → model cascade filtering
+    - Update model dropdown when brand is selected
+    """
+    try:
+        result = await che168_service.get_models(brand_id)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in che168 models endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Models fetch failed: {str(e)}")
+
+
+@app.get("/api/che168/years/{brand_id}/{series_id}", response_model=Che168SearchResponse)
+async def get_che168_years(brand_id: int, series_id: int):
+    """
+    Get available years for a specific brand and model (cascading filter)
+
+    **Parameters:**
+    - `brand_id`: Brand ID
+    - `series_id`: Model/Series ID
+
+    **Example:**
+    ```
+    GET /api/che168/years/15/65  # Get BMW X3 years
+    ```
+
+    **Use Cases:**
+    - Implement brand → model → year cascade filtering
+    - Update year dropdown when model is selected
+    """
+    try:
+        result = await che168_service.get_years(brand_id, series_id)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in che168 years endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Years fetch failed: {str(e)}")
+
+
+@app.post("/api/che168/translate", response_model=TranslationResponse)
+async def translate_che168_text(request: TranslationRequest):
+    """
+    Translate Chinese car content to Russian
+
+    **Request Body:**
+    ```json
+    {
+      "text": "宝马X3 2020款 xDrive25i 豪华套装",
+      "target_language": "ru",
+      "source_language": "zh-cn",
+      "type": "analysis"
+    }
+    ```
+
+    **Use Cases:**
+    - Translate car names and specifications
+    - Localize Chinese content for Russian users
+    - Batch translation of search results
+    """
+    try:
+        result = await che168_service.translate_text(request.text, request.target_language)
+        return result
+
+    except Exception as e:
+        logger.error(f"Error in che168 translation endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}")
+
+
+@app.get("/api/che168/test")
+async def test_che168_integration():
+    """
+    Test Che168 API integration and service health
+
+    **Response Format:**
+    ```json
+    {
+      "status": "success",
+      "che168_api": {
+        "brands_available": true,
+        "search_working": true,
+        "sample_cars_count": 12
+      },
+      "service": "che168_chinese_marketplace",
+      "timestamp": "2025-01-15T10:30:00Z"
+    }
+    ```
+    """
+    try:
+        # Test brands endpoint
+        brands_result = await che168_service.get_brands()
+        brands_working = brands_result.returncode == 0
+
+        # Test search with basic filters
+        filters = Che168SearchFilters(pagesize=1)
+        search_result = await che168_service.search_cars(filters)
+        search_working = search_result.success
+
+        return {
+            "status": "success",
+            "che168_api": {
+                "brands_available": brands_working,
+                "total_brand_groups": len(brands_result.result) if brands_working else 0,
+                "search_working": search_working,
+                "sample_cars_count": len(search_result.cars) if search_working else 0,
+                "proxy_status": che168_service.proxy_client is not None,
+                "session_info": che168_service.get_session_info(),
+            },
+            "service": "che168_chinese_marketplace",
+            "version": "1.0.0",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error in che168 test endpoint: {str(e)}")
+        return {
+            "status": "error",
+            "che168_api": {
+                "error": str(e),
+                "proxy_status": che168_service.proxy_client is not None,
+            },
+            "service": "che168_chinese_marketplace",
+            "timestamp": datetime.now().isoformat(),
+        }
 
 
 # =============================================================================

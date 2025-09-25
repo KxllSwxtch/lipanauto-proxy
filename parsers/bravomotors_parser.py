@@ -1,232 +1,364 @@
 """
-BravoMotors Parser
-Handles JSON parsing for Chinese car marketplace API responses via bravomotors.com
+Che168 Parser
+Handles JSON parsing for che168.com API responses from Chinese car marketplace
 """
 
 import json
 import logging
+import re
 from typing import Dict, List, Optional, Any
 from urllib.parse import urljoin
 
 from schemas.bravomotors import (
-    BravoMotorsSearchResponse,
-    BravoMotorsCarListing,
-    BravoMotorsCarDetail,
-    BravoMotorsCarDetailResponse,
-    BravoMotorsFiltersResponse,
+    Che168SearchResponse,
+    Che168CarListing,
+    Che168CarDetailResponse,
+    Che168CarDetailSection,
+    Che168CarDetailItem,
+    Che168FiltersResponse,
+    Che168Brand,
+    Che168BrandGroup,
+    Che168BrandsResponse,
+    Che168FilterItem,
     TranslationResponse,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class BravoMotorsParser:
+class Che168Parser:
     """
-    Comprehensive parser for BravoMotors API responses
-    Handles JSON parsing and data transformation for Chinese car data
+    Comprehensive parser for che168.com API responses
+    Handles JSON parsing and data transformation for Chinese car marketplace data
     """
 
     def __init__(self):
-        self.base_url = "https://bravomotorrs.com"
-        self.parser_name = "bravomotors_json"
+        self.base_url = "https://www.che168.com"
+        self.parser_name = "che168_json"
 
-    def parse_car_search_response(self, json_data: Dict) -> BravoMotorsSearchResponse:
+        # CNY to RUB conversion rate (approximate)
+        self.cny_to_rub_rate = 15.04
+
+    def parse_brands_response(self, json_data: Dict) -> Che168BrandsResponse:
         """
-        Parse car search API response from BravoMotors
+        Parse brands API response from che168.com
 
         Args:
-            json_data: Raw JSON response from API
+            json_data: Raw JSON response from brands API
 
         Returns:
-            BravoMotorsSearchResponse with parsed data
+            Che168BrandsResponse with parsed brands data
+        """
+        try:
+            if json_data.get("returncode") != 0:
+                logger.error(f"Brands API returned error: {json_data.get('message', 'Unknown error')}")
+                return Che168BrandsResponse(
+                    returncode=json_data.get("returncode", -1),
+                    message=json_data.get("message", "Failed to fetch brands"),
+                    result={}
+                )
+
+            result = json_data.get("result", {})
+            parsed_result = {}
+
+            # Parse each brand category (hotbrand, allbrand, etc.)
+            for category, brands_data in result.items():
+                if isinstance(brands_data, list):
+                    parsed_items = []
+                    for item_data in brands_data:
+                        try:
+                            # Check if this is a brand group (has 'letter' and 'brand' fields)
+                            if 'letter' in item_data and 'brand' in item_data:
+                                # Parse brand group
+                                group_brands = []
+                                for brand_data in item_data.get('brand', []):
+                                    try:
+                                        brand = Che168Brand(**brand_data)
+                                        group_brands.append(brand)
+                                    except Exception as e:
+                                        logger.warning(f"Failed to parse brand in group {item_data.get('letter', 'unknown')}: {e}")
+                                        continue
+
+                                group = Che168BrandGroup(
+                                    letter=item_data['letter'],
+                                    brand=group_brands,
+                                    on_sale_num=item_data.get('on_sale_num', 0)
+                                )
+                                parsed_items.append(group)
+                            else:
+                                # Parse individual brand
+                                brand = Che168Brand(**item_data)
+                                parsed_items.append(brand)
+                        except Exception as e:
+                            logger.warning(f"Failed to parse item in {category}: {e}")
+                            continue
+                    parsed_result[category] = parsed_items
+                elif isinstance(brands_data, bool):
+                    # Handle boolean flags like 'hasonlinesale'
+                    parsed_result[category] = brands_data
+                else:
+                    parsed_result[category] = brands_data
+
+            return Che168BrandsResponse(
+                returncode=json_data["returncode"],
+                message=json_data["message"],
+                result=parsed_result
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to parse brands response: {e}")
+            return Che168BrandsResponse(
+                returncode=-1,
+                message=f"Parse error: {str(e)}",
+                result={}
+            )
+
+    def parse_car_search_response(self, json_data: Dict) -> Che168SearchResponse:
+        """
+        Parse car search API response from che168.com
+
+        Args:
+            json_data: Raw JSON response from search API
+
+        Returns:
+            Che168SearchResponse with parsed data
         """
         try:
             # Check response status
             if json_data.get("returncode") != 0:
-                return BravoMotorsSearchResponse(
-                    success=False,
-                    cars=[],
-                    total_count=0,
-                    meta={
-                        "parser": self.parser_name,
-                        "error": f"API returned code {json_data.get('returncode')}: {json_data.get('message', 'Unknown error')}",
-                    },
+                return Che168SearchResponse(
+                    returncode=json_data.get("returncode", -1),
+                    message=json_data.get("message", "Search failed"),
+                    result={},
+                    success=False
                 )
 
-            result = json_data.get("result", [])
-            car_listings = []
+            result = json_data.get("result", {})
+            cars = []
+            filters = []
 
-            # Parse each car entry
-            for item in result:
+            # Parse car listings from carlist
+            carlist = result.get("carlist", [])
+            for car_data in carlist:
                 try:
-                    car_data = self._parse_car_item(item)
-                    if car_data:
-                        car_listings.append(car_data)
+                    # Convert price from 万元 to actual price and RUB
+                    price_wan = float(car_data.get("price", "0"))
+                    price_rub = price_wan * 10000 * self.cny_to_rub_rate if price_wan > 0 else None
+
+                    car = Che168CarListing(
+                        infoid=car_data["infoid"],
+                        carname=car_data["carname"],
+                        cname=car_data["cname"],
+                        dealerid=car_data["dealerid"],
+                        mileage=car_data["mileage"],
+                        cityid=car_data["cityid"],
+                        seriesid=car_data["seriesid"],
+                        specid=car_data["specid"],
+                        sname=car_data.get("sname", ""),
+                        syname=car_data.get("syname", ""),
+                        price=car_data["price"],
+                        price_rub=price_rub,
+                        saveprice=car_data.get("saveprice", ""),
+                        discount=car_data.get("discount", ""),
+                        firstregyear=car_data["firstregyear"],
+                        fromtype=car_data["fromtype"],
+                        imageurl=car_data["imageurl"],
+                        cartype=car_data["cartype"],
+                        bucket=car_data.get("bucket", 0),
+                        isunion=car_data.get("isunion", 0)
+                    )
+                    cars.append(car)
+
                 except Exception as e:
-                    logger.warning(f"Failed to parse car item: {str(e)}")
+                    logger.warning(f"Failed to parse car listing {car_data.get('infoid', 'unknown')}: {e}")
                     continue
 
-            return BravoMotorsSearchResponse(
-                success=True,
-                cars=car_listings,
-                total_count=len(car_listings),
-                page=1,
-                per_page=len(car_listings),
-                total_pages=1,
-                meta={
-                    "parser": self.parser_name,
-                    "source": "bravomotors_api",
-                },
+            # Parse filter items (service, brand, price, etc.)
+            filter_categories = [
+                "service", "brand", "price", "agerange", "mileage",
+                "fueltype", "transmission", "displacement", "series"
+            ]
+
+            for category in filter_categories:
+                if category in result:
+                    category_filters = result[category]
+                    if isinstance(category_filters, list):
+                        for filter_data in category_filters:
+                            try:
+                                filter_item = Che168FilterItem(**filter_data)
+                                filters.append(filter_item)
+                            except Exception as e:
+                                logger.warning(f"Failed to parse filter item in {category}: {e}")
+                                continue
+
+            return Che168SearchResponse(
+                returncode=json_data["returncode"],
+                message=json_data["message"],
+                result=result,
+                cars=cars,
+                total_count=result.get("totalcount", len(cars)),
+                page_count=result.get("pagecount", 1),
+                current_page=result.get("pageindex", 1),
+                page_size=result.get("pagesize", 12),
+                filters=filters,
+                success=True
             )
 
         except Exception as e:
-            logger.error(f"Failed to parse BravoMotors search response: {str(e)}")
-            return BravoMotorsSearchResponse(
-                success=False,
-                cars=[],
-                total_count=0,
-                meta={
-                    "parser": self.parser_name,
-                    "error": str(e),
-                },
+            logger.error(f"Failed to parse search response: {e}")
+            return Che168SearchResponse(
+                returncode=-1,
+                message=f"Parse error: {str(e)}",
+                result={},
+                success=False
             )
 
-    def _parse_car_item(self, item: Dict) -> Optional[BravoMotorsCarListing]:
+    def parse_car_detail_response(self, json_data: Dict) -> Che168CarDetailResponse:
         """
-        Parse individual car item from the API response
+        Parse car detail API response from che168.com
 
         Args:
-            item: Dictionary containing car data section
+            json_data: Raw JSON response from car detail API
 
         Returns:
-            BravoMotorsCarListing or None if parsing fails
-        """
-        try:
-            # Handle the nested structure from the API response
-            title_section = item.get("title", "")
-            data_section = item.get("data", [])
-
-            if not data_section:
-                return None
-
-            # Extract car basic information
-            car_info = {}
-            for data_item in data_section:
-                name = data_item.get("name", "")
-                content = data_item.get("content", "")
-                car_info[name] = content
-
-            # Extract key fields
-            car_title = car_info.get("车型名称", title_section)
-            if not car_title:
-                return None
-
-            # Generate unique ID from title
-            car_id = f"bm_{hash(car_title)}"
-
-            # Parse price
-            price_str = car_info.get("厂商指导价(元)", "0")
-            price = self._parse_price(price_str)
-
-            # Parse year from registration date or model name
-            year = self._parse_year(
-                car_info.get("首次上牌时间", ""),
-                car_info.get("上市时间", ""),
-                car_title
-            )
-
-            # Parse engine info
-            engine_info = car_info.get("发动机", "")
-            engine_volume = self._parse_engine_volume(engine_info, car_info.get("排量(L)", ""))
-
-            # Parse other specifications
-            transmission = car_info.get("变速箱", "")
-            fuel_type = car_info.get("能源类型", car_info.get("燃料形式", ""))
-            drivetrain = car_info.get("驱动方式", "")
-
-            # Extract manufacturer and model from title
-            manufacturer, model = self._parse_manufacturer_model(car_title)
-
-            return BravoMotorsCarListing(
-                id=car_id,
-                title=car_title,
-                price=price,
-                currency="CNY",
-                year=year,
-                manufacturer=manufacturer,
-                model=model,
-                engine_volume=engine_volume,
-                fuel_type=fuel_type,
-                transmission=transmission,
-                drivetrain=drivetrain,
-                source_platform="bravomotors",
-            )
-
-        except Exception as e:
-            logger.warning(f"Failed to parse car item: {str(e)}")
-            return None
-
-    def parse_car_detail_response(self, json_data: Dict) -> BravoMotorsCarDetailResponse:
-        """
-        Parse detailed car information response
-
-        Args:
-            json_data: Raw JSON response for car details
-
-        Returns:
-            BravoMotorsCarDetailResponse with parsed details
+            Che168CarDetailResponse with parsed detail data
         """
         try:
             if json_data.get("returncode") != 0:
-                return BravoMotorsCarDetailResponse(
-                    success=False,
-                    meta={
-                        "parser": self.parser_name,
-                        "error": f"API returned code {json_data.get('returncode')}",
-                    },
+                return Che168CarDetailResponse(
+                    returncode=json_data.get("returncode", -1),
+                    message=json_data.get("message", "Failed to get car details"),
+                    result=[],
+                    success=False
                 )
 
             result = json_data.get("result", [])
+            sections = []
 
-            # Organize data by sections
-            car_sections = {}
-            for section in result:
-                title = section.get("title", "")
-                data = section.get("data", [])
-                car_sections[title] = {item.get("name"): item.get("content") for item in data}
+            # Parse each detail section (engine, body, etc.)
+            for section_data in result:
+                try:
+                    items = []
 
-            car_detail = BravoMotorsCarDetail(
-                id=f"bm_detail_{hash(str(json_data))}",
-                basic_info=car_sections.get("基本参数", {}),
-                specifications={
-                    "engine": car_sections.get("发动机", {}),
-                    "transmission": car_sections.get("变速箱", {}),
-                    "chassis": car_sections.get("底盘转向", {}),
-                    "body": car_sections.get("车身", {}),
-                    "wheels": car_sections.get("车轮制动", {}),
-                },
-                condition_info=car_sections.get("牌照信息", {}),
-                features=[],  # Features would need additional parsing
-            )
+                    # Parse data items in each section
+                    for item_data in section_data.get("data", []):
+                        try:
+                            item = Che168CarDetailItem(
+                                name=item_data["name"],
+                                content=item_data["content"],
+                                countline=item_data.get("countline", 0)
+                            )
+                            items.append(item)
+                        except Exception as e:
+                            logger.warning(f"Failed to parse detail item {item_data.get('name', 'unknown')}: {e}")
+                            continue
 
-            return BravoMotorsCarDetailResponse(
-                success=True,
-                car=car_detail,
-                meta={
-                    "parser": self.parser_name,
-                    "sections_found": len(car_sections),
-                },
+                    section = Che168CarDetailSection(
+                        title=section_data["title"],
+                        data=items
+                    )
+                    sections.append(section)
+
+                except Exception as e:
+                    logger.warning(f"Failed to parse detail section {section_data.get('title', 'unknown')}: {e}")
+                    continue
+
+            return Che168CarDetailResponse(
+                returncode=json_data["returncode"],
+                message=json_data["message"],
+                result=sections,
+                success=True
             )
 
         except Exception as e:
-            logger.error(f"Failed to parse car detail response: {str(e)}")
-            return BravoMotorsCarDetailResponse(
-                success=False,
-                meta={
-                    "parser": self.parser_name,
-                    "error": str(e),
-                },
+            logger.error(f"Failed to parse car detail response: {e}")
+            return Che168CarDetailResponse(
+                returncode=-1,
+                message=f"Parse error: {str(e)}",
+                result=[],
+                success=False
             )
+
+    def create_filters_response(self, brands: List[Che168Brand]) -> Che168FiltersResponse:
+        """
+        Create structured filters response from brands and predefined options
+
+        Args:
+            brands: List of available car brands
+
+        Returns:
+            Che168FiltersResponse with all filter options
+        """
+        try:
+            price_ranges = [
+                {"value": "0-5", "label": "0-5万元"},
+                {"value": "5-10", "label": "5-10万元"},
+                {"value": "10-15", "label": "10-15万元"},
+                {"value": "15-20", "label": "15-20万元"},
+                {"value": "20-30", "label": "20-30万元"},
+                {"value": "30-50", "label": "30-50万元"},
+                {"value": "50-100", "label": "50-100万元"},
+                {"value": "100-", "label": "100万元以上"}
+            ]
+
+            age_ranges = [
+                {"value": "0-1", "label": "1年以内"},
+                {"value": "1-3", "label": "1-3年"},
+                {"value": "3-5", "label": "3-5年"},
+                {"value": "5-7", "label": "5-7年"},
+                {"value": "7-10", "label": "7-10年"},
+                {"value": "10-", "label": "10年以上"}
+            ]
+
+            mileage_ranges = [
+                {"value": "0-1", "label": "1万公里以内"},
+                {"value": "1-3", "label": "1-3万公里"},
+                {"value": "3-6", "label": "3-6万公里"},
+                {"value": "6-10", "label": "6-10万公里"},
+                {"value": "10-15", "label": "10-15万公里"},
+                {"value": "15-", "label": "15万公里以上"}
+            ]
+
+            fuel_types = [
+                {"id": 1, "name": "汽油", "label": "Бензин"},
+                {"id": 2, "name": "柴油", "label": "Дизель"},
+                {"id": 3, "name": "电动", "label": "Электро"},
+                {"id": 4, "name": "油电混合", "label": "Гибрид"},
+                {"id": 5, "name": "插电式混合", "label": "Плагин-гибрид"}
+            ]
+
+            transmissions = [
+                {"value": "manual", "label": "手动"},
+                {"value": "automatic", "label": "自动"},
+                {"value": "amt", "label": "手自一体"},
+                {"value": "dct", "label": "双离合"},
+                {"value": "cvt", "label": "无级变速"}
+            ]
+
+            displacements = [
+                {"value": "0-1.0", "label": "1.0L以下"},
+                {"value": "1.0-1.6", "label": "1.0-1.6L"},
+                {"value": "1.6-2.0", "label": "1.6-2.0L"},
+                {"value": "2.0-2.5", "label": "2.0-2.5L"},
+                {"value": "2.5-3.0", "label": "2.5-3.0L"},
+                {"value": "3.0-4.0", "label": "3.0-4.0L"},
+                {"value": "4.0-", "label": "4.0L以上"}
+            ]
+
+            return Che168FiltersResponse(
+                brands=brands,
+                price_ranges=price_ranges,
+                age_ranges=age_ranges,
+                mileage_ranges=mileage_ranges,
+                fuel_types=fuel_types,
+                transmissions=transmissions,
+                displacements=displacements,
+                success=True
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to create filters response: {e}")
+            return Che168FiltersResponse(success=False)
 
     def parse_translation_response(self, json_data: Dict) -> TranslationResponse:
         """
@@ -243,117 +375,35 @@ class BravoMotorsParser:
                 original_text=json_data.get("originalText", ""),
                 translated_text=json_data.get("translatedText", ""),
                 source_language=json_data.get("sourceLanguage", "zh-cn"),
-                target_language=json_data.get("targetLanguage", "en"),
+                target_language=json_data.get("targetLanguage", "ru"),
                 type=json_data.get("type", "analysis"),
                 is_static=json_data.get("isStatic", False),
                 is_cached=json_data.get("isCached", False),
                 success=json_data.get("success", False),
             )
         except Exception as e:
-            logger.error(f"Failed to parse translation response: {str(e)}")
+            logger.error(f"Failed to parse translation response: {e}")
             return TranslationResponse(
                 original_text="",
                 translated_text="",
                 source_language="zh-cn",
-                target_language="en",
+                target_language="ru",
                 type="analysis",
                 success=False,
             )
 
-    def _parse_price(self, price_str: str) -> Optional[float]:
-        """Parse price from Chinese price string"""
-        try:
-            if not price_str or price_str == "-":
-                return None
 
-            # Remove Chinese characters and extract number
-            price_clean = price_str.replace("万", "").replace("元", "").strip()
-            if price_clean:
-                # Convert 万 (10,000) to actual number
-                price_num = float(price_clean)
-                if "万" in price_str:
-                    price_num *= 10000
-                return price_num
-            return None
-        except (ValueError, TypeError):
-            return None
+# =============================================================================
+# LEGACY BRAVOMOTORS PARSER (DEPRECATED - Use Che168Parser instead)
+# =============================================================================
 
-    def _parse_year(self, reg_date: str, launch_date: str, title: str) -> Optional[int]:
-        """Parse year from various date formats"""
-        try:
-            # Try registration date first
-            if reg_date and reg_date != "-":
-                year = int(reg_date.split("-")[0])
-                if 1990 <= year <= 2030:
-                    return year
 
-            # Try launch date
-            if launch_date and launch_date != "-":
-                year_str = launch_date.replace(".", "").strip()
-                if len(year_str) >= 4:
-                    year = int(year_str[:4])
-                    if 1990 <= year <= 2030:
-                        return year
+class BravoMotorsParser(Che168Parser):
+    """
+    Legacy BravoMotors parser - deprecated, use Che168Parser instead
+    This class exists for backward compatibility only
+    """
 
-            # Try to extract from title
-            import re
-            year_match = re.search(r'(20\d{2})', title)
-            if year_match:
-                return int(year_match.group(1))
-
-            return None
-        except (ValueError, TypeError):
-            return None
-
-    def _parse_engine_volume(self, engine_str: str, displacement_str: str) -> Optional[float]:
-        """Parse engine volume from engine description"""
-        try:
-            # First try displacement string
-            if displacement_str and displacement_str != "-":
-                return float(displacement_str)
-
-            # Parse from engine string (e.g., "2.0T 258马力 L4")
-            if engine_str and engine_str != "-":
-                import re
-                volume_match = re.search(r'(\d+\.\d+)', engine_str)
-                if volume_match:
-                    return float(volume_match.group(1))
-
-            return None
-        except (ValueError, TypeError):
-            return None
-
-    def _parse_manufacturer_model(self, title: str) -> tuple[Optional[str], Optional[str]]:
-        """Parse manufacturer and model from car title"""
-        try:
-            # Common Chinese car brand mappings
-            brand_mapping = {
-                "奔驰": "Mercedes-Benz",
-                "宝马": "BMW",
-                "奥迪": "Audi",
-                "大众": "Volkswagen",
-                "丰田": "Toyota",
-                "本田": "Honda",
-                "日产": "Nissan",
-                "马自达": "Mazda",
-                "雷克萨斯": "Lexus",
-                "英菲尼迪": "Infiniti",
-            }
-
-            for chinese_brand, english_brand in brand_mapping.items():
-                if title.startswith(chinese_brand):
-                    # Extract model from remaining text
-                    model_part = title[len(chinese_brand):].strip()
-                    model = model_part.split()[0] if model_part else None
-                    return english_brand, model
-
-            # If no known brand found, try to split the first two parts
-            parts = title.split()
-            if len(parts) >= 2:
-                return parts[0], parts[1]
-            elif len(parts) == 1:
-                return parts[0], None
-
-            return None, None
-        except Exception:
-            return None, None
+    def __init__(self):
+        super().__init__()
+        logger.warning("BravoMotorsParser is deprecated. Use Che168Parser instead.")

@@ -14,15 +14,14 @@ from urllib.parse import urlencode
 import requests
 from requests.exceptions import RequestException, Timeout
 
-from parsers.che168_parser import Che168Parser
-from schemas.che168 import (
+from parsers.bravomotors_parser import Che168Parser
+from schemas.bravomotors import (
     Che168SearchResponse,
     Che168CarDetailResponse,
     Che168FiltersResponse,
     Che168SearchFilters,
     Che168BrandsResponse,
-    Che168ModelsResponse,
-    Che168YearsResponse,
+    TranslationResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -245,12 +244,12 @@ class Che168Service:
                 "iscxcshowed": str(filters.iscxcshowed),
                 "scene_no": str(filters.scene_no),
                 "pageid": f"{int(time.time())}_4145",
-                "existtags": filters.existtags,
+                "existtags": getattr(filters, 'existtags', ''),
                 "pid": str(filters.pid),
-                "testtype": filters.testtype,
-                "test102223": filters.test102223,
-                "testnewcarspecid": filters.testnewcarspecid,
-                "test102797": filters.test102797,
+                "testtype": getattr(filters, 'testtype', ''),
+                "test102223": getattr(filters, 'test102223', ''),
+                "testnewcarspecid": getattr(filters, 'testnewcarspecid', ''),
+                "test102797": getattr(filters, 'test102797', ''),
                 "otherstatisticsext": "%7B%22history%22%3A%22%E5%88%97%E8%A1%A8%E9%A1%B5%22%2C%22pvareaid%22%3A%220%22%2C%22eventid%22%3A%22usc_2sc_mc_mclby_cydj_click%22%7D",
                 "filtertype": str(filters.filtertype),
                 "ssnew": str(filters.ssnew),
@@ -267,22 +266,17 @@ class Che168Service:
                 params["specid"] = str(filters.specid)
 
             json_data = await self._make_request(url, params)
-            result = self.parser.parse_api_response(json_data)
+            result = self.parser.parse_car_search_response(json_data)
 
             return result
 
         except Exception as e:
             logger.error(f"Error in search_cars: {str(e)}")
             return Che168SearchResponse(
-                success=False,
-                cars=[],
-                pagination={},
-                service_filters=[],
-                total_count=0,
-                meta={
-                    "service": "che168_search",
-                    "error": f"Service error: {str(e)}",
-                },
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result={},
+                success=False
             )
 
     async def get_car_detail(self, info_id: int) -> Che168CarDetailResponse:
@@ -296,48 +290,25 @@ class Che168Service:
             Che168CarDetailResponse with car details
         """
         try:
-            # This would typically be a different endpoint for car details
-            # For now, we'll search for this specific car
-            filters = Che168SearchFilters(pagesize=1)
-            search_result = await self.search_cars(filters)
+            # Use the car detail endpoint
+            url = f"{self.base_url}/api/v2/getcardetail"
 
-            if not search_result.success:
-                return Che168CarDetailResponse(
-                    success=False,
-                    car=None,
-                    error="Failed to fetch car details",
-                    meta={"service": "che168_detail", "info_id": info_id},
-                )
+            params = {
+                "infoid": str(info_id),
+            }
 
-            # Look for the specific car in results
-            target_car = None
-            for car in search_result.cars:
-                if car.infoid == info_id:
-                    target_car = car
-                    break
+            json_data = await self._make_request(url, params)
+            result = self.parser.parse_car_detail_response(json_data)
 
-            if not target_car:
-                return Che168CarDetailResponse(
-                    success=False,
-                    car=None,
-                    error=f"Car with ID {info_id} not found",
-                    meta={"service": "che168_detail", "info_id": info_id},
-                )
-
-            return Che168CarDetailResponse(
-                success=True,
-                car=target_car,
-                error=None,
-                meta={"service": "che168_detail", "info_id": info_id},
-            )
+            return result
 
         except Exception as e:
             logger.error(f"Error in get_car_detail for {info_id}: {str(e)}")
             return Che168CarDetailResponse(
-                success=False,
-                car=None,
-                error=f"Service error: {str(e)}",
-                meta={"service": "che168_detail", "info_id": info_id},
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result=[],
+                success=False
             )
 
     async def get_filters(self) -> Che168FiltersResponse:
@@ -348,38 +319,41 @@ class Che168Service:
             Che168FiltersResponse with available filters
         """
         try:
-            # Get filters from a basic search request
-            filters = Che168SearchFilters(pagesize=1)
-            search_result = await self.search_cars(filters)
+            # Get brands first
+            brands_result = await self.get_brands()
 
-            if not search_result.success:
+            if not brands_result.returncode == 0:
                 return Che168FiltersResponse(
                     success=False,
-                    service_types=[],
-                    meta={
-                        "service": "che168_filters",
-                        "error": "Failed to fetch filters",
-                    },
+                    brands=[],
+                    price_ranges=[],
+                    age_ranges=[],
+                    mileage_ranges=[],
+                    fuel_types=[],
+                    transmissions=[],
+                    displacements=[]
                 )
 
-            return Che168FiltersResponse(
-                success=True,
-                service_types=search_result.service_filters,
-                meta={
-                    "service": "che168_filters",
-                    "total_filters": len(search_result.service_filters),
-                },
-            )
+            # Create structured filters response using parser
+            all_brands = []
+            for brand_group in brands_result.result.values():
+                if isinstance(brand_group, list):
+                    all_brands.extend(brand_group)
+
+            result = self.parser.create_filters_response(all_brands)
+            return result
 
         except Exception as e:
             logger.error(f"Error in get_filters: {str(e)}")
             return Che168FiltersResponse(
                 success=False,
-                service_types=[],
-                meta={
-                    "service": "che168_filters",
-                    "error": f"Service error: {str(e)}",
-                },
+                brands=[],
+                price_ranges=[],
+                age_ranges=[],
+                mileage_ranges=[],
+                fuel_types=[],
+                transmissions=[],
+                displacements=[]
             )
 
     def update_cookies(self, new_cookies: Dict[str, str]):
@@ -415,7 +389,7 @@ class Che168Service:
             result = self.parser.parse_brands_response(json_data)
 
             # Cache the result
-            if result.success:
+            if result.returncode == 0:
                 self.brands_cache = result
                 self.brands_cache_time = current_time
 
@@ -424,17 +398,12 @@ class Che168Service:
         except Exception as e:
             logger.error(f"Error in get_brands: {str(e)}")
             return Che168BrandsResponse(
-                success=False,
-                brands=[],
-                brand_groups=[],
-                total_brands=0,
-                meta={
-                    "service": "che168_brands",
-                    "error": f"Service error: {str(e)}",
-                },
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result={}
             )
 
-    async def get_models(self, brand_id: int) -> Che168ModelsResponse:
+    async def get_models(self, brand_id: int) -> Che168SearchResponse:
         """
         Get available models for a specific brand
 
@@ -442,7 +411,7 @@ class Che168Service:
             brand_id: Brand ID to get models for
 
         Returns:
-            Che168ModelsResponse with available models
+            Che168SearchResponse with search results containing model filters
         """
         try:
             # Check cache first
@@ -457,16 +426,11 @@ class Che168Service:
             search_result = await self.search_cars(filters)
 
             if not search_result.success:
-                return Che168ModelsResponse(
-                    success=False,
-                    models=[],
-                    brand_id=brand_id,
-                    total_models=0,
-                    meta={
-                        "service": "che168_models",
-                        "brand_id": brand_id,
-                        "error": "Failed to fetch models from search API",
-                    },
+                return Che168SearchResponse(
+                    returncode=-1,
+                    message="Failed to fetch models from search API",
+                    result={},
+                    success=False
                 )
 
             # We need to make another request to get the raw response with filters
@@ -498,43 +462,15 @@ class Che168Service:
             raw_response = await self._make_request(url, params)
 
             if raw_response.get("returncode") != 0:
-                return Che168ModelsResponse(
-                    success=False,
-                    models=[],
-                    brand_id=brand_id,
-                    total_models=0,
-                    meta={
-                        "service": "che168_models",
-                        "brand_id": brand_id,
-                        "error": f"API error: {raw_response.get('message', 'Unknown error')}",
-                    },
+                return Che168SearchResponse(
+                    returncode=raw_response.get("returncode", -1),
+                    message=raw_response.get('message', 'Unknown error'),
+                    result={},
+                    success=False
                 )
 
-            # Extract models from filters
-            filter_data = self.parser.parse_filters_from_raw_response(raw_response, "seriesid")
-            models = [
-                Che168ModelFilter(
-                    title=f["title"],
-                    key=f["key"],
-                    value=f["value"],
-                    dtype=f["dtype"],
-                    subvalue=f["subvalue"],
-                    subspecname=f["subspecname"],
-                )
-                for f in filter_data
-            ]
-
-            result = Che168ModelsResponse(
-                success=True,
-                models=models,
-                brand_id=brand_id,
-                total_models=len(models),
-                meta={
-                    "service": "che168_models",
-                    "brand_id": brand_id,
-                    "extracted_from": "search_filters",
-                },
-            )
+            # Parse the response with models in filters
+            result = self.parser.parse_car_search_response(raw_response)
 
             # Cache the result
             self.models_cache[cache_key] = (result, time.time())
@@ -543,19 +479,14 @@ class Che168Service:
 
         except Exception as e:
             logger.error(f"Error in get_models for brand {brand_id}: {str(e)}")
-            return Che168ModelsResponse(
-                success=False,
-                models=[],
-                brand_id=brand_id,
-                total_models=0,
-                meta={
-                    "service": "che168_models",
-                    "brand_id": brand_id,
-                    "error": f"Service error: {str(e)}",
-                },
+            return Che168SearchResponse(
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result={},
+                success=False
             )
 
-    async def get_years(self, brand_id: int, series_id: int) -> Che168YearsResponse:
+    async def get_years(self, brand_id: int, series_id: int) -> Che168SearchResponse:
         """
         Get available years for a specific brand and model
 
@@ -564,7 +495,7 @@ class Che168Service:
             series_id: Series (model) ID
 
         Returns:
-            Che168YearsResponse with available years
+            Che168SearchResponse with search results containing year filters
         """
         try:
             # Check cache first
@@ -579,18 +510,11 @@ class Che168Service:
             search_result = await self.search_cars(filters)
 
             if not search_result.success:
-                return Che168YearsResponse(
-                    success=False,
-                    years=[],
-                    brand_id=brand_id,
-                    series_id=series_id,
-                    total_years=0,
-                    meta={
-                        "service": "che168_years",
-                        "brand_id": brand_id,
-                        "series_id": series_id,
-                        "error": "Failed to fetch years from search API",
-                    },
+                return Che168SearchResponse(
+                    returncode=-1,
+                    message="Failed to fetch years from search API",
+                    result={},
+                    success=False
                 )
 
             # Make another request to get the raw response with year filters
@@ -622,47 +546,15 @@ class Che168Service:
             raw_response = await self._make_request(url, params)
 
             if raw_response.get("returncode") != 0:
-                return Che168YearsResponse(
-                    success=False,
-                    years=[],
-                    brand_id=brand_id,
-                    series_id=series_id,
-                    total_years=0,
-                    meta={
-                        "service": "che168_years",
-                        "brand_id": brand_id,
-                        "series_id": series_id,
-                        "error": f"API error: {raw_response.get('message', 'Unknown error')}",
-                    },
+                return Che168SearchResponse(
+                    returncode=raw_response.get("returncode", -1),
+                    message=raw_response.get('message', 'Unknown error'),
+                    result={},
+                    success=False
                 )
 
-            # Extract years from filters
-            filter_data = self.parser.parse_filters_from_raw_response(raw_response, "seriesyearid")
-            years = [
-                Che168YearFilter(
-                    title=f["title"],
-                    key=f["key"],
-                    value=f["value"],
-                    dtype=f["dtype"],
-                    subvalue=f["subvalue"],
-                    subspecname=f["subspecname"],
-                )
-                for f in filter_data
-            ]
-
-            result = Che168YearsResponse(
-                success=True,
-                years=years,
-                brand_id=brand_id,
-                series_id=series_id,
-                total_years=len(years),
-                meta={
-                    "service": "che168_years",
-                    "brand_id": brand_id,
-                    "series_id": series_id,
-                    "extracted_from": "search_filters",
-                },
-            )
+            # Parse the response with years in filters
+            result = self.parser.parse_car_search_response(raw_response)
 
             # Cache the result
             self.years_cache[cache_key] = (result, time.time())
@@ -671,18 +563,57 @@ class Che168Service:
 
         except Exception as e:
             logger.error(f"Error in get_years for brand {brand_id}, series {series_id}: {str(e)}")
-            return Che168YearsResponse(
-                success=False,
-                years=[],
-                brand_id=brand_id,
-                series_id=series_id,
-                total_years=0,
-                meta={
-                    "service": "che168_years",
-                    "brand_id": brand_id,
-                    "series_id": series_id,
-                    "error": f"Service error: {str(e)}",
-                },
+            return Che168SearchResponse(
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result={},
+                success=False
+            )
+
+    async def translate_text(self, text: str, target_language: str = "ru") -> TranslationResponse:
+        """
+        Translate Chinese text to target language (Russian by default)
+
+        Args:
+            text: Chinese text to translate
+            target_language: Target language code (default: "ru")
+
+        Returns:
+            TranslationResponse with translation result
+        """
+        try:
+            # In a real implementation, you would use a translation service like:
+            # - Google Translate API
+            # - Baidu Translate API
+            # - Microsoft Translator
+            # - Or a local translation model
+
+            # For now, return a placeholder implementation
+            # This should be replaced with actual translation service
+
+            translation_data = {
+                "originalText": text,
+                "translatedText": text,  # Placeholder - should be actual translation
+                "sourceLanguage": "zh-cn",
+                "targetLanguage": target_language,
+                "type": "analysis",
+                "isStatic": False,
+                "isCached": False,
+                "success": True
+            }
+
+            result = self.parser.parse_translation_response(translation_data)
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in translate_text: {str(e)}")
+            return TranslationResponse(
+                original_text=text,
+                translated_text=text,
+                source_language="zh-cn",
+                target_language=target_language,
+                type="analysis",
+                success=False
             )
 
     def get_session_info(self) -> Dict[str, Any]:
