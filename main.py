@@ -66,6 +66,12 @@ from schemas.bravomotors import (
     Che168SearchFilters,
     Che168BrandsResponse,
 )
+from schemas.che168 import (
+    # Car detail API schemas
+    Che168CarInfoResponse,
+    Che168CarParamsResponse,
+    Che168CarAnalysisResponse,
+)
 from services.bravomotors_service import BravoMotorsService
 from services.che168_service import Che168Service
 
@@ -2674,6 +2680,165 @@ async def test_che168_integration():
             "service": "che168_chinese_marketplace",
             "timestamp": datetime.now().isoformat(),
         }
+
+
+@app.get("/api/che168/car/{info_id}/info", response_model=Che168CarInfoResponse)
+async def get_che168_car_info(info_id: int):
+    """
+    Get basic car information from Che168 getcarinfo API
+
+    **Parameters:**
+    - `info_id`: Car listing ID from search results
+
+    **Example Request:**
+    ```
+    GET /api/che168/car/56106853/info
+    ```
+
+    **Response Format:**
+    ```json
+    {
+      "returncode": 0,
+      "message": "Success",
+      "result": {
+        "infoid": 56106853,
+        "carname": "宝马X3 2018款 xDrive25i 豪华套装",
+        "brandid": 14,
+        "brandname": "宝马",
+        "seriesid": 692,
+        "seriesname": "宝马X3",
+        "price": 28.8,
+        "year": "2018",
+        "distance": 5.2,
+        "province": "北京",
+        "city": "北京",
+        "color": "白色",
+        "images": ["https://img1.che168.com/car/..."],
+        "dealer_name": "经销商名称",
+        "dealer_phone": "400-xxxx-xxxx"
+      }
+    }
+    ```
+
+    **Use Cases:**
+    - Display basic car information
+    - Show price, year, mileage
+    - Get dealer contact information
+    """
+    try:
+        result = await che168_service.get_car_info(info_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error in che168 car info endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Car info retrieval failed: {str(e)}")
+
+
+@app.get("/api/che168/car/{info_id}/params", response_model=Che168CarParamsResponse)
+async def get_che168_car_params(info_id: int):
+    """
+    Get detailed car parameters and specifications from Che168 getparamtypeitems API
+
+    **Parameters:**
+    - `info_id`: Car listing ID from search results
+
+    **Example Request:**
+    ```
+    GET /api/che168/car/56106853/params
+    ```
+
+    **Response Format:**
+    ```json
+    {
+      "returncode": 0,
+      "message": "Success",
+      "result": {
+        "infoid": 56106853,
+        "param_groups": [
+          {
+            "group_name": "基本信息",
+            "params": [
+              {"name": "品牌", "value": "宝马"},
+              {"name": "车系", "value": "宝马X3"},
+              {"name": "年款", "value": "2018款"},
+              {"name": "排量", "value": "2.0T"}
+            ]
+          },
+          {
+            "group_name": "发动机",
+            "params": [
+              {"name": "排量(L)", "value": "2.0"},
+              {"name": "进气形式", "value": "涡轮增压"},
+              {"name": "最大功率(kW)", "value": "135"}
+            ]
+          }
+        ]
+      }
+    }
+    ```
+
+    **Use Cases:**
+    - Display detailed car specifications
+    - Show technical parameters grouped by category
+    - Provide comprehensive vehicle information
+    """
+    try:
+        result = await che168_service.get_car_params(info_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error in che168 car params endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Car params retrieval failed: {str(e)}")
+
+
+@app.get("/api/che168/car/{info_id}/analysis", response_model=Che168CarAnalysisResponse)
+async def get_che168_car_analysis(info_id: int):
+    """
+    Get car analysis and evaluation data from Che168 getcaranalysis API
+
+    **Parameters:**
+    - `info_id`: Car listing ID from search results
+
+    **Example Request:**
+    ```
+    GET /api/che168/car/56106853/analysis
+    ```
+
+    **Response Format:**
+    ```json
+    {
+      "returncode": 0,
+      "message": "Success",
+      "result": {
+        "infoid": 56106853,
+        "market_analysis": {
+          "market_price_range": "25.0-32.0万",
+          "price_evaluation": "合理",
+          "market_position": "中等偏上"
+        },
+        "condition_analysis": {
+          "overall_condition": "良好",
+          "maintenance_record": "有记录",
+          "accident_history": "无事故"
+        },
+        "recommendations": [
+          "价格合理，性价比较高",
+          "车况良好，适合购买",
+          "建议实地查看"
+        ]
+      }
+    }
+    ```
+
+    **Use Cases:**
+    - Display market analysis and price evaluation
+    - Show condition assessment
+    - Provide purchase recommendations
+    """
+    try:
+        result = await che168_service.get_car_analysis(info_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error in che168 car analysis endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Car analysis retrieval failed: {str(e)}")
 
 
 # =============================================================================

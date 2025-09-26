@@ -316,3 +316,139 @@ class Che168FiltersResponse(BaseModel):
     success: bool = True
     service_types: List[Che168ServiceOption] = Field(default=[], description="Service type filters")
     meta: Optional[Dict[str, Any]] = None
+
+
+# Car Detail API Schemas
+
+class Che168CarInfo(BaseModel):
+    """Car information from getcarinfo API"""
+
+    infoid: int = Field(description="Car info ID")
+    carname: str = Field(description="Car name")
+    brandid: int = Field(description="Brand ID")
+    brandname: str = Field(description="Brand name")
+    seriesid: int = Field(description="Series ID")
+    seriesname: str = Field(description="Series name")
+    specid: int = Field(description="Spec ID")
+    cid: int = Field(description="City ID")
+    cname: str = Field(description="City name")
+    pid: int = Field(description="Province ID")
+    displacement: str = Field(description="Engine displacement")
+    gearbox: str = Field(description="Gearbox type")
+    mileage: float = Field(description="Mileage in km")
+    price: float = Field(description="Price in wan (10k) yuan")
+    remark: str = Field(default="", description="Car description")
+    vincode: str = Field(description="VIN code")
+    userid: int = Field(description="User ID")
+    dealerid: int = Field(description="Dealer ID")
+    transfercount: int = Field(description="Transfer count")
+    firstregshortdate: str = Field(description="First registration date (short)")
+    firstregdate: str = Field(description="First registration date")
+    firstregyear: str = Field(description="First registration year")
+    firstregstr: str = Field(description="Registration age string")
+    environmental: str = Field(description="Environmental standard")
+    isloan: int = Field(description="Has loan (1=yes, 0=no)")
+    downpayment: float = Field(description="Down payment")
+    haswarranty: int = Field(description="Has warranty (1=yes, 0=no)")
+    isbrandcar: int = Field(description="Is brand car")
+    iscontainfe: int = Field(description="Contains FE")
+    isnewcar: int = Field(description="Is new car")
+    istop: int = Field(description="Is top")
+    islatestcar: int = Field(description="Is latest car")
+    publicdate: str = Field(description="Publication date")
+    countyname: str = Field(description="County name")
+    imageurl: str = Field(description="Main image URL")
+    followcount: int = Field(description="Follow count")
+    examine: str = Field(description="Examination date")
+    insurance: str = Field(description="Insurance date")
+    colorname: str = Field(description="Color name")
+    carusename: str = Field(description="Car use name")
+
+
+class Che168CarInfoApiResponse(BaseModel):
+    """API response for getcarinfo endpoint"""
+
+    returncode: int = Field(description="Return code (0 = success)")
+    message: str = Field(description="Response message")
+    result: Che168CarInfo = Field(description="Car information")
+
+
+class Che168CarInfoResponse(BaseModel):
+    """Standardized car info response"""
+
+    success: bool = True
+    car: Optional[Che168CarInfo] = None
+    error: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None
+
+
+class Che168CarParam(BaseModel):
+    """Car parameter item"""
+
+    name: str = Field(description="Parameter name")
+    content: str = Field(description="Parameter value")
+    countline: int = Field(description="Count line")
+
+
+class Che168CarParamGroup(BaseModel):
+    """Car parameter group"""
+
+    title: str = Field(description="Group title")
+    data: List[Che168CarParam] = Field(description="Parameters in this group")
+
+
+class Che168CarParamsApiResponse(BaseModel):
+    """API response for getparamtypeitems endpoint"""
+
+    returncode: int = Field(description="Return code (0 = success)")
+    message: str = Field(description="Response message")
+    result: List[Che168CarParamGroup] = Field(description="Parameter groups")
+
+
+class Che168CarParamsResponse(BaseModel):
+    """Standardized car params response"""
+
+    success: bool = True
+    parameters: List[Che168CarParamGroup] = Field(default=[], description="Parameter groups")
+    error: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None
+
+
+class Che168AnalysisContent(BaseModel):
+    """Analysis content item"""
+
+    text: str = Field(description="Content text")
+    highlight: int = Field(description="Is highlighted (1=yes, 0=no)")
+
+
+class Che168CarAnalysis(BaseModel):
+    """Car analysis data"""
+
+    title: str = Field(description="Analysis title")
+    subtitle: str = Field(description="Analysis subtitle")
+    level: str = Field(description="Level image URL")
+    averagescore: float = Field(description="Average score")
+    pricescore: float = Field(description="Price score")
+    totalscore: float = Field(description="Total score")
+    koubeiscore: float = Field(description="Reputation score")
+    costscore: float = Field(description="Cost score")
+    baozhiscore: float = Field(description="Value retention score")
+    label: str = Field(description="Car label")
+    contents: List[Che168AnalysisContent] = Field(description="Analysis content")
+
+
+class Che168CarAnalysisApiResponse(BaseModel):
+    """API response for getcaranalysis endpoint"""
+
+    returncode: int = Field(description="Return code (0 = success)")
+    message: str = Field(description="Response message")
+    result: Che168CarAnalysis = Field(description="Car analysis data")
+
+
+class Che168CarAnalysisResponse(BaseModel):
+    """Standardized car analysis response"""
+
+    success: bool = True
+    analysis: Optional[Che168CarAnalysis] = None
+    error: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None

@@ -23,6 +23,11 @@ from schemas.bravomotors import (
     Che168BrandsResponse,
     TranslationResponse,
 )
+from schemas.che168 import (
+    Che168CarInfoResponse,
+    Che168CarParamsResponse,
+    Che168CarAnalysisResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -645,3 +650,135 @@ class Che168Service:
                 "years_cache_size": len(self.years_cache),
             },
         }
+
+    async def get_car_info(self, info_id: int) -> Che168CarInfoResponse:
+        """
+        Get basic car information using Che168 getcarinfo API
+
+        Args:
+            info_id: Car listing ID
+
+        Returns:
+            Che168CarInfoResponse with basic car information
+        """
+        try:
+            url = "https://apiuscdt.che168.com/api/v1/car/getcarinfo"
+
+            params = {
+                "infoid": str(info_id),
+                "_appid": "2sc.m"
+            }
+
+            json_data = await self._make_request(url, params)
+
+            # Create response using the schema
+            if json_data.get("returncode") == 0 and "result" in json_data:
+                result_data = json_data["result"]
+
+                return Che168CarInfoResponse(
+                    returncode=json_data.get("returncode", 0),
+                    message=json_data.get("message", "Success"),
+                    result=result_data
+                )
+            else:
+                return Che168CarInfoResponse(
+                    returncode=json_data.get("returncode", -1),
+                    message=json_data.get("message", "Failed to get car info"),
+                    result={}
+                )
+
+        except Exception as e:
+            logger.error(f"Error in get_car_info for {info_id}: {str(e)}")
+            return Che168CarInfoResponse(
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result={}
+            )
+
+    async def get_car_params(self, info_id: int) -> Che168CarParamsResponse:
+        """
+        Get detailed car parameters using Che168 getparamtypeitems API
+
+        Args:
+            info_id: Car listing ID
+
+        Returns:
+            Che168CarParamsResponse with car specifications
+        """
+        try:
+            url = "https://apiuscdt.che168.com/api/v1/car/getparamtypeitems"
+
+            params = {
+                "infoid": str(info_id),
+                "_appid": "2sc.m"
+            }
+
+            json_data = await self._make_request(url, params)
+
+            # Create response using the schema
+            if json_data.get("returncode") == 0 and "result" in json_data:
+                result_data = json_data["result"]
+
+                return Che168CarParamsResponse(
+                    returncode=json_data.get("returncode", 0),
+                    message=json_data.get("message", "Success"),
+                    result=result_data
+                )
+            else:
+                return Che168CarParamsResponse(
+                    returncode=json_data.get("returncode", -1),
+                    message=json_data.get("message", "Failed to get car params"),
+                    result={}
+                )
+
+        except Exception as e:
+            logger.error(f"Error in get_car_params for {info_id}: {str(e)}")
+            return Che168CarParamsResponse(
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result={}
+            )
+
+    async def get_car_analysis(self, info_id: int) -> Che168CarAnalysisResponse:
+        """
+        Get car analysis and evaluation using Che168 getcaranalysis API
+
+        Args:
+            info_id: Car listing ID
+
+        Returns:
+            Che168CarAnalysisResponse with car analysis data
+        """
+        try:
+            url = "https://apiuscdt.che168.com/api/v1/car/getcaranalysis"
+
+            params = {
+                "infoid": str(info_id),
+                "_appid": "2sc.m"
+            }
+
+            json_data = await self._make_request(url, params)
+
+            # Create response using the schema
+            if json_data.get("returncode") == 0 and "result" in json_data:
+                result_data = json_data["result"]
+
+                return Che168CarAnalysisResponse(
+                    returncode=json_data.get("returncode", 0),
+                    message=json_data.get("message", "Success"),
+                    result=result_data
+                )
+            else:
+                return Che168CarAnalysisResponse(
+                    returncode=json_data.get("returncode", -1),
+                    message=json_data.get("message", "Failed to get car analysis"),
+                    result={}
+                )
+
+        except Exception as e:
+            logger.error(f"Error in get_car_analysis for {info_id}: {str(e)}")
+            return Che168CarAnalysisResponse(
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result={}
+            )
