@@ -298,6 +298,7 @@ class Che168SearchFilters(BaseModel):
     seriesid: Optional[int] = Field(None, description="Series (model) ID filter")
     seriesyearid: Optional[int] = Field(None, description="Series year ID filter")
     specid: Optional[str] = Field(None, description="Specification IDs (comma-separated)")
+    sort: Optional[int] = Field(None, description="Sort order (0=default, 1=price asc, 2=price desc, 3=mileage, 4=age, 5=time)")
 
 
 class Che168CarDetailResponse(BaseModel):

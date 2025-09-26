@@ -264,6 +264,8 @@ class Che168Service:
                 params["seriesyearid"] = str(filters.seriesyearid)
             if filters.specid:
                 params["specid"] = str(filters.specid)
+            if filters.sort:
+                params["sort"] = str(filters.sort)
 
             json_data = await self._make_request(url, params)
             result = self.parser.parse_car_search_response(json_data)
