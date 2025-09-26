@@ -173,12 +173,13 @@ class Che168Parser:
                     logger.warning(f"Failed to parse car listing {car_data.get('infoid', 'unknown')}: {e}")
                     continue
 
-            # Parse filter items (service, brand, price, etc.)
+            # Parse filter items from both direct categories and filters array
             filter_categories = [
                 "service", "brand", "price", "agerange", "mileage",
                 "fueltype", "transmission", "displacement", "series"
             ]
 
+            # Parse filters from direct categories
             for category in filter_categories:
                 if category in result:
                     category_filters = result[category]
@@ -190,6 +191,17 @@ class Che168Parser:
                             except Exception as e:
                                 logger.warning(f"Failed to parse filter item in {category}: {e}")
                                 continue
+
+            # Parse filters from the main "filters" array (this contains series/models when brand is selected)
+            filters_array = result.get("filters", [])
+            if isinstance(filters_array, list):
+                for filter_data in filters_array:
+                    try:
+                        filter_item = Che168FilterItem(**filter_data)
+                        filters.append(filter_item)
+                    except Exception as e:
+                        logger.warning(f"Failed to parse filter item from filters array: {e}")
+                        continue
 
             return Che168SearchResponse(
                 returncode=json_data["returncode"],

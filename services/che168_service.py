@@ -424,19 +424,6 @@ class Che168Service:
                     return cached_result
 
             # Make search request with brand ID to get models from filters
-            filters = Che168SearchFilters(brandid=brand_id, pagesize=1)
-            search_result = await self.search_cars(filters)
-
-            if not search_result.success:
-                return Che168SearchResponse(
-                    returncode=-1,
-                    message="Failed to fetch models from search API",
-                    result={},
-                    success=False
-                )
-
-            # We need to make another request to get the raw response with filters
-            # Since the parsed response doesn't contain the raw filters data
             url = f"{self.base_url}/api/v11/search"
             params = {
                 "pageindex": "1",
@@ -474,6 +461,27 @@ class Che168Service:
             # Parse the response with models in filters
             result = self.parser.parse_car_search_response(raw_response)
 
+            # Extract models from filters array for easier frontend consumption
+            models = []
+            if result.filters:
+                for filter_item in result.filters:
+                    # Look for series/model filters (key = "seriesid")
+                    if filter_item.key == "seriesid":
+                        models.append({
+                            "id": int(filter_item.value),
+                            "name": filter_item.title,
+                            "icon": getattr(filter_item, 'icon', ''),
+                            "tag": getattr(filter_item, 'tag', ''),
+                            "value": filter_item.value,
+                            "title": filter_item.title,
+                            "subtitle": getattr(filter_item, 'subtitle', ''),
+                        })
+
+            # Add models array to result for frontend compatibility
+            if hasattr(result, 'result') and isinstance(result.result, dict):
+                result.result['models'] = models
+                result.result['series'] = models  # Also add as series for backward compatibility
+
             # Cache the result
             self.models_cache[cache_key] = (result, time.time())
 
@@ -508,18 +516,6 @@ class Che168Service:
                     return cached_result
 
             # Make search request with brand and series ID to get years from filters
-            filters = Che168SearchFilters(brandid=brand_id, seriesid=series_id, pagesize=1)
-            search_result = await self.search_cars(filters)
-
-            if not search_result.success:
-                return Che168SearchResponse(
-                    returncode=-1,
-                    message="Failed to fetch years from search API",
-                    result={},
-                    success=False
-                )
-
-            # Make another request to get the raw response with year filters
             url = f"{self.base_url}/api/v11/search"
             params = {
                 "pageindex": "1",
@@ -557,6 +553,24 @@ class Che168Service:
 
             # Parse the response with years in filters
             result = self.parser.parse_car_search_response(raw_response)
+
+            # Extract years from filters array for easier frontend consumption
+            years = []
+            if result.filters:
+                for filter_item in result.filters:
+                    # Look for year filters (key = "seriesyearid")
+                    if filter_item.key == "seriesyearid":
+                        years.append({
+                            "id": int(filter_item.value),
+                            "name": filter_item.title,
+                            "value": filter_item.value,
+                            "title": filter_item.title,
+                            "subtitle": getattr(filter_item, 'subtitle', ''),
+                        })
+
+            # Add years array to result for frontend compatibility
+            if hasattr(result, 'result') and isinstance(result.result, dict):
+                result.result['years'] = years
 
             # Cache the result
             self.years_cache[cache_key] = (result, time.time())
