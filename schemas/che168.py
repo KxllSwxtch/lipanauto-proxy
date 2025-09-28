@@ -376,10 +376,9 @@ class Che168CarInfoApiResponse(BaseModel):
 class Che168CarInfoResponse(BaseModel):
     """Standardized car info response"""
 
-    success: bool = True
-    car: Optional[Che168CarInfo] = None
-    error: Optional[str] = None
-    meta: Optional[Dict[str, Any]] = None
+    returncode: int = Field(description="Return code (0=success)")
+    message: str = Field(description="Response message")
+    result: Optional[Dict[str, Any]] = Field(default=None, description="Car information data")
 
 
 class Che168CarParam(BaseModel):
@@ -408,10 +407,9 @@ class Che168CarParamsApiResponse(BaseModel):
 class Che168CarParamsResponse(BaseModel):
     """Standardized car params response"""
 
-    success: bool = True
-    parameters: List[Che168CarParamGroup] = Field(default=[], description="Parameter groups")
-    error: Optional[str] = None
-    meta: Optional[Dict[str, Any]] = None
+    returncode: int = Field(description="Return code (0=success)")
+    message: str = Field(description="Response message")
+    result: Optional[List[Dict[str, Any]]] = Field(default=None, description="Parameter data")
 
 
 class Che168AnalysisContent(BaseModel):
@@ -448,7 +446,6 @@ class Che168CarAnalysisApiResponse(BaseModel):
 class Che168CarAnalysisResponse(BaseModel):
     """Standardized car analysis response"""
 
-    success: bool = True
-    analysis: Optional[Che168CarAnalysis] = None
-    error: Optional[str] = None
-    meta: Optional[Dict[str, Any]] = None
+    returncode: int = Field(description="Return code (0=success)")
+    message: str = Field(description="Response message")
+    result: Optional[Dict[str, Any]] = Field(default=None, description="Analysis data")

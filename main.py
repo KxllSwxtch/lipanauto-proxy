@@ -364,7 +364,7 @@ vlb_customs_service = VLBCustomsService(proxy_client=None)
 kbchachacha_service = KBChaChaService(proxy_client)
 # Initialize BravoMotors service WITH proxy for Chinese site access
 bravomotors_service = BravoMotorsService(proxy_client)
-che168_service = Che168Service(proxy_client)
+che168_service = Che168Service(None)
 
 
 @app.on_event("shutdown")

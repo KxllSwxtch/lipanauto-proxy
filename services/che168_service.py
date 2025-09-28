@@ -155,7 +155,7 @@ class Che168Service:
             return "1af9c29a34a656070bfa923b31e570eb"
 
     async def _make_request(
-        self, url: str, params: Dict = None, use_proxy: bool = True
+        self, url: str, params: Dict = None, use_proxy: bool = False
     ) -> Dict[str, Any]:
         """
         Make HTTP request with error handling and retry logic
