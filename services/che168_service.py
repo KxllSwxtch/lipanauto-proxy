@@ -709,7 +709,7 @@ class Che168Service:
             Che168CarParamsResponse with car specifications
         """
         try:
-            url = "https://apiuscdt.che168.com/apic/v2/car/getparamtypeitems"
+            url = "https://apiuscdt.che168.com/api/v1/car/getparamtypeitems"
 
             params = {
                 "infoid": str(info_id),
@@ -734,7 +734,7 @@ class Che168Service:
                 return Che168CarParamsResponse(
                     returncode=json_data.get("returncode", -1),
                     message=json_data.get("message", "Failed to get car params"),
-                    result={}
+                    result=[]
                 )
 
         except Exception as e:
@@ -742,12 +742,13 @@ class Che168Service:
             return Che168CarParamsResponse(
                 returncode=-1,
                 message=f"Service error: {str(e)}",
-                result={}
+                result=[]
             )
 
     async def get_car_analysis(self, info_id: int) -> Che168CarAnalysisResponse:
         """
         Get car analysis and evaluation using Che168 getcaranalysis API
+        Note: This endpoint is currently not available on Che168 API
 
         Args:
             info_id: Car listing ID
@@ -756,33 +757,14 @@ class Che168Service:
             Che168CarAnalysisResponse with car analysis data
         """
         try:
-            url = "https://apiuscdt.che168.com/apic/v2/car/getcaranalysis"
-
-            params = {
-                "infoid": str(info_id),
-                "_appid": "2sc.m"
-            }
-
-            # Use direct request for v2 API (no signature required)
-            response = self.session.get(url, params=params)
-            response.raise_for_status()
-            json_data = response.json()
-
-            # Create response using the schema
-            if json_data.get("returncode") == 0 and "result" in json_data:
-                result_data = json_data["result"]
-
-                return Che168CarAnalysisResponse(
-                    returncode=json_data.get("returncode", 0),
-                    message=json_data.get("message", "Success"),
-                    result=result_data
-                )
-            else:
-                return Che168CarAnalysisResponse(
-                    returncode=json_data.get("returncode", -1),
-                    message=json_data.get("message", "Failed to get car analysis"),
-                    result={}
-                )
+            # The getcaranalysis endpoint is not available on Che168 API
+            # Return a default response indicating no analysis data available
+            logger.info(f"Car analysis not available for {info_id} - endpoint does not exist")
+            return Che168CarAnalysisResponse(
+                returncode=0,
+                message="Analysis data not available for this vehicle",
+                result={}
+            )
 
         except Exception as e:
             logger.error(f"Error in get_car_analysis for {info_id}: {str(e)}")
