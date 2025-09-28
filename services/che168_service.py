@@ -662,14 +662,17 @@ class Che168Service:
             Che168CarInfoResponse with basic car information
         """
         try:
-            url = "https://apiuscdt.che168.com/api/v1/car/getcarinfo"
+            url = "https://apiuscdt.che168.com/apic/v2/car/getcarinfo"
 
             params = {
                 "infoid": str(info_id),
                 "_appid": "2sc.m"
             }
 
-            json_data = await self._make_request(url, params)
+            # Use direct request for v2 API (no signature required)
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            json_data = response.json()
 
             # Create response using the schema
             if json_data.get("returncode") == 0 and "result" in json_data:
@@ -706,14 +709,17 @@ class Che168Service:
             Che168CarParamsResponse with car specifications
         """
         try:
-            url = "https://apiuscdt.che168.com/api/v1/car/getparamtypeitems"
+            url = "https://apiuscdt.che168.com/apic/v2/car/getparamtypeitems"
 
             params = {
                 "infoid": str(info_id),
                 "_appid": "2sc.m"
             }
 
-            json_data = await self._make_request(url, params)
+            # Use direct request for v2 API (no signature required)
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            json_data = response.json()
 
             # Create response using the schema
             if json_data.get("returncode") == 0 and "result" in json_data:
@@ -750,14 +756,17 @@ class Che168Service:
             Che168CarAnalysisResponse with car analysis data
         """
         try:
-            url = "https://apiuscdt.che168.com/api/v1/car/getcaranalysis"
+            url = "https://apiuscdt.che168.com/apic/v2/car/getcaranalysis"
 
             params = {
                 "infoid": str(info_id),
                 "_appid": "2sc.m"
             }
 
-            json_data = await self._make_request(url, params)
+            # Use direct request for v2 API (no signature required)
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            json_data = response.json()
 
             # Create response using the schema
             if json_data.get("returncode") == 0 and "result" in json_data:
