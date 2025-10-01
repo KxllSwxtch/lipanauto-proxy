@@ -1,0 +1,43 @@
+# Translation Builder - Git Ignore
+
+# Generated Data Files (can be large)
+car_data.json
+chinese_terms_categorized.json
+translation_template.csv
+progress.json
+
+# Translation work files
+*_translated.csv
+*_manual.csv
+terms_for_manual_translation.csv
+
+# Logs
+scraping.log
+*.log
+
+# Backups
+*.backup
+*.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deprecated files (no longer needed - manual translation approach)
+.env.translation
+.env.translation.template
+chinese_terms.json
+new_terms.json
+new_translations.json
+
+# Keep essential files
+!config.json
+!translation_builder.py
+!README_TRANSLATIONS.md
+!QUICKSTART.md

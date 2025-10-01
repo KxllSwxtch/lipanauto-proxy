@@ -1,0 +1,45 @@
+{
+  "max_pages": 20,
+  "page_size": 20,
+  "min_delay": 3,
+  "max_delay": 7,
+  "max_requests_per_proxy": 20,
+  "_comment": "Configuration for Translation Builder - Manual Edition",
+  "_settings_explained": {
+    "max_pages": "Maximum number of pages to scrape from che168 API (20 pages = ~400 cars)",
+    "page_size": "Number of cars per page (che168 default: 20)",
+    "min_delay": "Minimum delay in seconds between requests (anti-detection)",
+    "max_delay": "Maximum delay in seconds between requests (random range)",
+    "max_requests_per_proxy": "Max requests before rotating to next proxy"
+  },
+  "_safe_presets": {
+    "conservative": {
+      "max_pages": 10,
+      "min_delay": 5,
+      "max_delay": 10,
+      "max_requests_per_proxy": 15,
+      "_note": "Safest option, slower but minimal detection risk"
+    },
+    "balanced": {
+      "max_pages": 20,
+      "min_delay": 3,
+      "max_delay": 7,
+      "max_requests_per_proxy": 20,
+      "_note": "Default - good balance of speed and safety"
+    },
+    "aggressive": {
+      "max_pages": 50,
+      "min_delay": 2,
+      "max_delay": 5,
+      "max_requests_per_proxy": 30,
+      "_note": "Faster but higher detection risk"
+    }
+  },
+  "_term_categories": {
+    "brands": "Short brand names like 奔驰, 宝马, 奥迪",
+    "specs": "Technical specs like 排量, 变速箱, 驱动方式",
+    "features": "Car features like 天窗, 座椅, 导航",
+    "models": "Model names, usually 2-4 characters",
+    "descriptions": "Longer descriptions and condition terms"
+  }
+}
