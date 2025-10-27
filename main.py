@@ -831,6 +831,9 @@ async def health_check():
             providers[provider] = 0
         providers[provider] += 1
 
+    # Get che168 service statistics
+    che168_stats = che168_service.get_session_info()
+
     return {
         "status": "healthy",
         "proxy_client": {
@@ -854,10 +857,23 @@ async def health_check():
             "bobaedream_bikes": "✅ Active (motorcycles) - with proxy",
             "kbchachacha_korean": "✅ Active (korean cars) - with proxy",
             "bravomotors_chinese": "✅ Active (chinese cars via bravomotors) - with proxy",
-            "che168_chinese": "✅ Active (chinese cars via che168.com) - with proxy",
+            "che168_chinese": "🚀 OPTIMIZED (chinese cars via che168.com) - with smart retry & caching",
             "tks_customs": "🚀 OPTIMIZED (customs calculator) - direct connection + CAPTCHA caching",
             "parser_engine": "BeautifulSoup4 + lxml",
             "captcha_solver": "CapSolver API integration + background pre-solving",
+        },
+        "che168_optimizations": {
+            "failed_request_cache": che168_stats.get("failed_request_cache", {}),
+            "circuit_breaker": che168_stats.get("circuit_breaker", {}),
+            "request_count": che168_stats.get("request_count", 0),
+            "features": [
+                "Smart retry logic (only retriable errors)",
+                "Failed request caching (5min TTL)",
+                "Circuit breaker (10 failures/min threshold)",
+                "Async sleep (non-blocking)",
+                "Parallel API fetching",
+                "Proper HTTP status codes"
+            ]
         },
     }
 
@@ -2494,14 +2510,45 @@ async def get_che168_car_detail(info_id: int):
     - Display detailed car specifications
     - Show technical parameters
     - Get comprehensive car information for import calculations
+
+    **Status Codes:**
+    - 200: Success - car details retrieved
+    - 404: Not Found - car listing doesn't exist or was delisted
+    - 503: Service Unavailable - circuit breaker is open or API down
+    - 500: Internal Server Error - unexpected error
     """
     try:
         result = await che168_service.get_car_detail(info_id)
-        return result
 
+        # Return proper HTTP status codes based on service response
+        if result.returncode == 0 and result.success:
+            # Success
+            return result
+        elif result.returncode == 404:
+            # Car not found - return 404
+            raise HTTPException(
+                status_code=404,
+                detail=f"Car listing {info_id} not found - may be sold or delisted"
+            )
+        elif result.returncode == 503:
+            # Service unavailable (circuit breaker open)
+            raise HTTPException(
+                status_code=503,
+                detail="Che168 service temporarily unavailable - please try again later"
+            )
+        else:
+            # Other errors - return 500
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch car details: {result.message}"
+            )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        logger.error(f"Error in che168 car detail endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Car detail fetch failed: {str(e)}")
+        logger.error(f"Unexpected error in che168 car detail endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/api/che168/filters", response_model=Che168FiltersResponse)

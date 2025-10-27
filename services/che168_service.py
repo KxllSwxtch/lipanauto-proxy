@@ -3,6 +3,7 @@ Che168 Service
 Business logic layer for Chinese car marketplace integration
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -12,7 +13,7 @@ import hmac
 from typing import Dict, Any, Optional, List
 from urllib.parse import urlencode
 import requests
-from requests.exceptions import RequestException, Timeout
+from requests.exceptions import RequestException, Timeout, ConnectionError
 
 from parsers.bravomotors_parser import Che168Parser
 from schemas.bravomotors import (
@@ -28,6 +29,12 @@ from schemas.che168 import (
     Che168CarParamsResponse,
     Che168CarAnalysisResponse,
 )
+
+# Import request cache utility
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from lib.request_cache import RequestCache
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +67,14 @@ class Che168Service:
         # Cache for session persistence
         self.session_cookies = {}
         self.device_id = "e51c9bd2-efd9-4aaa-b0bd-4f0fd92d9f84"
+
+        # Failed request cache (5 minute TTL for 404s)
+        self.failed_request_cache = RequestCache(max_size=500, default_ttl=300)
+
+        # Circuit breaker state
+        self.circuit_breaker_failures = 0
+        self.circuit_breaker_last_reset = time.time()
+        self.circuit_breaker_cooldown_until = 0
 
         # Setup session after device_id is defined
         self._setup_session()
@@ -154,16 +169,67 @@ class Che168Service:
             # Fallback to example sign from cars.py
             return "1af9c29a34a656070bfa923b31e570eb"
 
+    def _is_retriable_error(self, exception: Exception) -> bool:
+        """
+        Determine if an error should be retried
+
+        Retriable errors:
+        - 5xx server errors (temporary server issues)
+        - Network timeouts
+        - Connection errors
+
+        Non-retriable errors:
+        - 404 Not Found (resource doesn't exist)
+        - 400 Bad Request (invalid parameters)
+        - 401/403 Authentication/Authorization errors
+        """
+        if isinstance(exception, Timeout):
+            return True
+
+        if isinstance(exception, ConnectionError):
+            return True
+
+        if isinstance(exception, RequestException):
+            if hasattr(exception, 'response') and exception.response is not None:
+                status_code = exception.response.status_code
+                # Only retry 5xx errors
+                return 500 <= status_code < 600
+
+        return False
+
+    def _check_circuit_breaker(self) -> bool:
+        """
+        Check if circuit breaker is open (requests should be blocked)
+
+        Returns:
+            True if requests are allowed, False if circuit is open
+        """
+        current_time = time.time()
+
+        # Reset failure counter every 60 seconds
+        if current_time - self.circuit_breaker_last_reset > 60:
+            self.circuit_breaker_failures = 0
+            self.circuit_breaker_last_reset = current_time
+
+        # Check if in cooldown period
+        if current_time < self.circuit_breaker_cooldown_until:
+            remaining = int(self.circuit_breaker_cooldown_until - current_time)
+            logger.warning(f"Circuit breaker is OPEN - cooldown for {remaining}s more")
+            return False
+
+        return True
+
     async def _make_request(
-        self, url: str, params: Dict = None, use_proxy: bool = False
+        self, url: str, params: Dict = None, use_proxy: bool = False, max_retries: int = 1
     ) -> Dict[str, Any]:
         """
-        Make HTTP request with error handling and retry logic
+        Make HTTP request with intelligent error handling and retry logic
 
         Args:
             url: Target URL
             params: Query parameters
             use_proxy: Whether to use proxy client
+            max_retries: Maximum retry attempts (default: 1, only for retriable errors)
 
         Returns:
             JSON response data
@@ -186,8 +252,23 @@ class Che168Service:
         # Generate signature
         params["_sign"] = self._generate_sign(params)
 
-        max_retries = 3
-        for attempt in range(max_retries):
+        # Check cache for failed requests first
+        cached_response = self.failed_request_cache.get(url, params)
+        if cached_response is not None:
+            return cached_response
+
+        # Check circuit breaker
+        if not self._check_circuit_breaker():
+            return {
+                "returncode": 503,
+                "message": "Service temporarily unavailable (circuit breaker open)",
+                "result": {},
+            }
+
+        request_start_time = time.time()
+        last_exception = None
+
+        for attempt in range(max_retries + 1):
             try:
                 if use_proxy and self.proxy_client:
                     # Use proxy client if available
@@ -200,19 +281,68 @@ class Che168Service:
 
                 # Parse JSON response
                 json_data = response.json()
+
+                # Log slow requests
+                request_time = time.time() - request_start_time
+                if request_time > 5.0:
+                    logger.warning(f"Slow request detected: {url} took {request_time:.2f}s")
+
+                # Reset circuit breaker on success
+                self.circuit_breaker_failures = 0
+
                 return json_data
 
             except RequestException as e:
-                logger.warning(f"Request attempt {attempt + 1} failed: {str(e)}")
-                if attempt < max_retries - 1:
-                    # Exponential backoff
-                    await_time = 2 ** attempt
-                    time.sleep(await_time + random.uniform(0, 1))
+                last_exception = e
+                status_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') and e.response else None
+
+                # Log appropriately based on error type
+                if status_code == 404:
+                    logger.info(f"Resource not found (404): {url} - infoid may be invalid or car delisted")
+                elif status_code and 400 <= status_code < 500:
+                    logger.warning(f"Client error ({status_code}): {url} - {str(e)}")
+                else:
+                    logger.warning(f"Request attempt {attempt + 1}/{max_retries + 1} failed: {str(e)}")
+
+                # Check if error is retriable
+                is_retriable = self._is_retriable_error(e)
+
+                # Cache non-retriable errors (404, 400, etc.) to prevent redundant requests
+                if not is_retriable and status_code:
+                    error_response = {
+                        "returncode": status_code,
+                        "message": f"Request failed with {status_code}: {str(e)}",
+                        "result": {},
+                    }
+                    # Cache 404s for 5 minutes, other client errors for 1 minute
+                    ttl = 300 if status_code == 404 else 60
+                    self.failed_request_cache.set(url, error_response, params, ttl=ttl)
+
+                    # Update circuit breaker
+                    self.circuit_breaker_failures += 1
+                    if self.circuit_breaker_failures >= 10:  # 10 failures in 1 minute
+                        self.circuit_breaker_cooldown_until = time.time() + 10
+                        logger.error(f"Circuit breaker OPENED - too many failures ({self.circuit_breaker_failures})")
+
+                    return error_response
+
+                # Only retry if error is retriable and we have retries left
+                if is_retriable and attempt < max_retries:
+                    # Exponential backoff with async sleep (non-blocking)
+                    backoff_time = (2 ** attempt) * 0.5 + random.uniform(0, 0.5)
+                    logger.info(f"Retriable error, retrying in {backoff_time:.1f}s...")
+                    await asyncio.sleep(backoff_time)
                     continue
                 else:
+                    # No more retries or non-retriable error
+                    self.circuit_breaker_failures += 1
+                    if self.circuit_breaker_failures >= 10:
+                        self.circuit_breaker_cooldown_until = time.time() + 10
+                        logger.error(f"Circuit breaker OPENED - too many failures ({self.circuit_breaker_failures})")
+
                     return {
-                        "returncode": 1,
-                        "message": f"Request failed after {max_retries} attempts: {str(e)}",
+                        "returncode": status_code or 1,
+                        "message": f"Request failed: {str(e)}",
                         "result": {},
                     }
 
@@ -223,6 +353,13 @@ class Che168Service:
                     "message": f"Unexpected error: {str(e)}",
                     "result": {},
                 }
+
+        # Should not reach here, but handle it gracefully
+        return {
+            "returncode": 1,
+            "message": f"Request failed after {max_retries + 1} attempts: {str(last_exception)}",
+            "result": {},
+        }
 
     async def search_cars(self, filters: Che168SearchFilters) -> Che168SearchResponse:
         """
@@ -290,6 +427,12 @@ class Che168Service:
         """
         Get detailed information for a specific car
 
+        This method now uses the working endpoints:
+        - /car/getcarinfo for basic information
+        - /car/getparamtypeitems for detailed parameters
+
+        These are fetched in parallel for better performance.
+
         Args:
             info_id: Car listing ID
 
@@ -297,17 +440,121 @@ class Che168Service:
             Che168CarDetailResponse with car details
         """
         try:
-            # Use the car detail endpoint
-            url = f"{self.base_url}/api/v2/getcardetail"
+            # Fetch car info and params in parallel using the working endpoints
+            car_info_task = self.get_car_info(info_id)
+            car_params_task = self.get_car_params(info_id)
 
-            params = {
-                "infoid": str(info_id),
-            }
+            # Wait for both requests to complete
+            car_info_response, car_params_response = await asyncio.gather(
+                car_info_task,
+                car_params_task,
+                return_exceptions=True
+            )
 
-            json_data = await self._make_request(url, params)
-            result = self.parser.parse_car_detail_response(json_data)
+            # Check if requests failed
+            if isinstance(car_info_response, Exception):
+                logger.error(f"Error fetching car info for {info_id}: {str(car_info_response)}")
+                return Che168CarDetailResponse(
+                    returncode=-1,
+                    message=f"Failed to fetch car info: {str(car_info_response)}",
+                    result=[],
+                    success=False
+                )
 
-            return result
+            if isinstance(car_params_response, Exception):
+                logger.error(f"Error fetching car params for {info_id}: {str(car_params_response)}")
+                # We can still return partial data if we have car info
+                car_params_response = Che168CarParamsResponse(
+                    returncode=0,
+                    message="Params not available",
+                    result=[]
+                )
+
+            # Check if car info is valid
+            if car_info_response.returncode != 0:
+                return Che168CarDetailResponse(
+                    returncode=car_info_response.returncode,
+                    message=car_info_response.message or "Car info not found",
+                    result=[],
+                    success=False
+                )
+
+            # Combine the results into the expected format
+            combined_result = []
+
+            # Add basic info section from car_info
+            if car_info_response.result:
+                from schemas.bravomotors import Che168CarDetailSection, Che168CarDetailItem
+
+                info_data = car_info_response.result
+                basic_info_items = []
+
+                # Map important fields from car info
+                field_mapping = [
+                    ("carname", "车型"),
+                    ("brandname", "品牌"),
+                    ("seriesname", "车系"),
+                    ("cname", "城市"),
+                    ("price", "价格(万元)"),
+                    ("mileage", "里程(万公里)"),
+                    ("firstregyear", "首次上牌"),
+                    ("displacement", "排量"),
+                    ("gearbox", "变速箱"),
+                    ("environmental", "排放标准"),
+                    ("colorname", "颜色"),
+                    ("transfercount", "过户次数"),
+                ]
+
+                for field_key, field_label in field_mapping:
+                    if field_key in info_data and info_data[field_key]:
+                        basic_info_items.append(Che168CarDetailItem(
+                            name=field_label,
+                            content=str(info_data[field_key]),
+                            countline=1
+                        ))
+
+                if basic_info_items:
+                    combined_result.append(Che168CarDetailSection(
+                        title="基本信息",
+                        data=basic_info_items
+                    ))
+
+            # Add parameter sections from car_params
+            if car_params_response.returncode == 0 and car_params_response.result:
+                from schemas.bravomotors import Che168CarDetailSection, Che168CarDetailItem
+
+                for param_group in car_params_response.result:
+                    if isinstance(param_group, dict) and 'title' in param_group and 'data' in param_group:
+                        param_items = []
+                        for item in param_group['data']:
+                            if isinstance(item, dict) and 'name' in item and 'content' in item:
+                                param_items.append(Che168CarDetailItem(
+                                    name=item['name'],
+                                    content=item['content'],
+                                    countline=item.get('countline', 1)
+                                ))
+
+                        if param_items:
+                            combined_result.append(Che168CarDetailSection(
+                                title=param_group['title'],
+                                data=param_items
+                            ))
+
+            # Return combined response
+            if combined_result:
+                return Che168CarDetailResponse(
+                    returncode=0,
+                    message="Success",
+                    result=combined_result,
+                    success=True
+                )
+            else:
+                return Che168CarDetailResponse(
+                    returncode=404,
+                    message="No car details found",
+                    result=[],
+                    success=False
+                )
 
         except Exception as e:
             logger.error(f"Error in get_car_detail for {info_id}: {str(e)}")
@@ -638,7 +885,7 @@ class Che168Service:
             )
 
     def get_session_info(self) -> Dict[str, Any]:
-        """Get current session information"""
+        """Get current session information including cache statistics"""
         return {
             "device_id": self.device_id,
             "request_count": self.request_count,
@@ -649,6 +896,12 @@ class Che168Service:
                 "models_cache_size": len(self.models_cache),
                 "years_cache_size": len(self.years_cache),
             },
+            "failed_request_cache": self.failed_request_cache.get_stats(),
+            "circuit_breaker": {
+                "failures": self.circuit_breaker_failures,
+                "is_open": time.time() < self.circuit_breaker_cooldown_until,
+                "cooldown_remaining": max(0, int(self.circuit_breaker_cooldown_until - time.time()))
+            }
         }
 
     async def get_car_info(self, info_id: int) -> Che168CarInfoResponse:
