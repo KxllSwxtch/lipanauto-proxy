@@ -416,9 +416,9 @@ class VLBCustomsService:
 
         Formula from bike-turnkey.md:
         - Base price + 10% markup
-        - Documents: 60,000 RUB
+        - Broker Services: 105,000 RUB
         - Korea logistics: 520,000 KRW → RUB
-        - Vladivostok logistics: $550 → RUB
+        - Vladivostok logistics: 55,000 RUB
         - Packaging: 500,000 KRW → RUB
         - Customs total (from VLB)
         """
@@ -430,14 +430,14 @@ class VLBCustomsService:
         markup_10_percent = int(base_price_rub * 0.1)
 
         # Fixed costs
-        documents_fee = 60000
+        documents_fee = 105000  # Broker Services fee (Услуги Брокера)
 
         # Convert variable costs
         korea_logistics_krw = 520000
         korea_logistics_rub = int(korea_logistics_krw * krw_to_rub_rate)
 
-        vladivostok_logistics_usd = 550
-        vladivostok_logistics_rub = int(vladivostok_logistics_usd * usd_to_rub_rate)
+        vladivostok_logistics_usd = 550  # Kept for schema compatibility
+        vladivostok_logistics_rub = 55000  # Fixed RUB value (Логистика до Владивостока)
 
         packaging_krw = 500000
         packaging_rub = int(packaging_krw * krw_to_rub_rate)

@@ -3008,9 +3008,9 @@ async def calculate_bike_turnkey_price(bike_id: str):
 
     Includes:
     - Base bike price + 10% markup
-    - Documents fee (60,000 RUB)
+    - Broker Services fee (105,000 RUB)
     - Korea logistics (520,000 KRW converted to RUB)
-    - Vladivostok logistics ($550 converted to RUB)
+    - Vladivostok logistics (55,000 RUB fixed)
     - Packaging (500,000 KRW converted to RUB)
     - Customs duties (calculated via VLB broker)
 
@@ -3024,8 +3024,8 @@ async def calculate_bike_turnkey_price(bike_id: str):
     - Exchange rates used
     """
     try:
-        # First get bike customs calculation
-        customs_request = BikeCustomsRequest(force_refresh=False)
+        # First get bike customs calculation (force_refresh=True to disable caching)
+        customs_request = BikeCustomsRequest(force_refresh=True)
         customs_response = await calculate_bike_customs(bike_id, customs_request)
 
         if not customs_response.success or not customs_response.customs:
