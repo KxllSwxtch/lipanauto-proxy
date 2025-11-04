@@ -83,7 +83,8 @@ class KZPriceTableService:
                         continue
 
                     # Convert to appropriate types
-                    volume = float(volume) if volume else None
+                    # Round volume to 1 decimal place to match table format (e.g., 2.998 → 3.0)
+                    volume = round(float(volume), 1) if volume else None
                     year = int(year) if year else None
                     price_usd = float(price_usd) if price_usd else None
 
@@ -184,6 +185,13 @@ class KZPriceTableService:
         manufacturer_lower = manufacturer.lower().strip()
         model_lower = model.lower().strip()
 
+        # Round volume to 1 decimal place to match table format
+        original_volume = volume
+        volume = round(volume, 1)
+
+        if original_volume != volume:
+            print(f"📊 Rounded engine volume: {original_volume}L → {volume}L for lookup")
+
         # Search for matching entries
         best_match = None
         best_match_score = 0
@@ -228,6 +236,9 @@ class KZPriceTableService:
         2. Same manufacturer, model with closest year
         3. Fallback to None
         """
+        # Round volume to 1 decimal place for consistency
+        volume = round(volume, 1)
+
         # Try ±1 year
         for year_offset in [-1, 1]:
             adjusted_year = year + year_offset
