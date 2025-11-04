@@ -1426,6 +1426,170 @@ async def get_customs_debug_info():
 
 
 # ============================================================================
+# Kazakhstan Customs & Exchange Rate API Endpoints
+# ============================================================================
+
+from schemas.kazakhstan import (
+    KZCalculationRequest,
+    KZCalculationResponse,
+    ExchangeRatesResponse,
+    KZPriceLookupRequest,
+    KZPriceLookupResponse,
+)
+from services.kazakhstan_customs_service import kazakhstan_customs_service
+from services.exchange_rate_service import exchange_rate_service
+from services.kz_price_table_service import kz_price_table_service
+
+
+@app.get("/api/exchange-rates", response_model=ExchangeRatesResponse)
+async def get_exchange_rates():
+    """
+    Get current exchange rates for Kazakhstan calculations
+
+    Fetches USD/KRW and KZT/KRW rates from Google Sheets (cells K7 and K8)
+    https://docs.google.com/spreadsheets/d/1i3Kj3rA0PVTJrNPL5fzEuN8qjRiOkLgrOpet16r2X5A
+
+    **Returns:**
+    - usd_krw: USD to KRW exchange rate
+    - kzt_krw: KZT to KRW exchange rate
+    - timestamp: When rates were fetched
+    - is_fallback: Whether fallback rates were used
+    """
+    try:
+        rates = exchange_rate_service.get_exchange_rates()
+
+        return ExchangeRatesResponse(
+            success=True,
+            usd_krw=rates.get("usd_krw"),
+            kzt_krw=rates.get("kzt_krw"),
+            timestamp=rates.get("timestamp"),
+            is_fallback=rates.get("fallback", False),
+        )
+
+    except Exception as e:
+        logger.error(f"Error fetching exchange rates: {str(e)}")
+        return ExchangeRatesResponse(
+            success=False,
+            error=f"Failed to fetch exchange rates: {str(e)}",
+        )
+
+
+@app.get("/api/kz-price-table/lookup", response_model=KZPriceLookupResponse)
+async def lookup_kz_price(
+    manufacturer: str = Query(..., description="Car manufacturer (e.g., Hyundai)"),
+    model: str = Query(..., description="Car model (e.g., Sonata)"),
+    volume: float = Query(..., description="Engine volume in liters (e.g., 2.0)"),
+    year: int = Query(..., description="Manufacturing year (e.g., 2020)"),
+):
+    """
+    Lookup car price in USD from Kazakhstan price table (kz-table.xlsx)
+
+    This price is used for customs calculations in Kazakhstan.
+
+    **Parameters:**
+    - manufacturer: Car manufacturer
+    - model: Car model
+    - volume: Engine volume in liters
+    - year: Manufacturing year
+
+    **Example:**
+    `/api/kz-price-table/lookup?manufacturer=Hyundai&model=Sonata&volume=2.0&year=2020`
+
+    **Returns:**
+    - price_usd: Price in USD from kz-table.xlsx
+    - match_type: Type of match found (exact, fuzzy_year, closest)
+    """
+    try:
+        price = kz_price_table_service.lookup_price(
+            manufacturer=manufacturer,
+            model=model,
+            volume=volume,
+            year=year,
+        )
+
+        if price is None:
+            return KZPriceLookupResponse(
+                success=False,
+                error=f"No price found for {manufacturer} {model} {volume}L {year}",
+            )
+
+        return KZPriceLookupResponse(
+            success=True,
+            price_usd=price,
+            match_type="exact",  # Could be enhanced to track match type
+        )
+
+    except Exception as e:
+        logger.error(f"Error looking up KZ price: {str(e)}")
+        return KZPriceLookupResponse(
+            success=False,
+            error=f"Lookup failed: {str(e)}",
+        )
+
+
+@app.post("/api/customs/calculate-kazakhstan", response_model=KZCalculationResponse)
+async def calculate_kazakhstan_customs(request: KZCalculationRequest):
+    """
+    Calculate complete turnkey price for Kazakhstan (Almaty)
+
+    Based on formula from KAZAKHSTAN.md:
+    1. Car price + Korea expenses (parking, transport, export docs)
+    2. Freight ($2,600)
+    3. Convert to KZT using Google Sheets rates
+    4. Customs duties (calculator.ida.kz formula)
+    5. Company commission ($300)
+
+    **Parameters:**
+    - manufacturer: Car manufacturer
+    - model: Car model
+    - price_krw: Car price in Korean Won
+    - year: Manufacturing year
+    - engine_volume: Engine volume in liters
+    - price_usd_for_customs: (Optional) USD price for customs. If not provided, will be looked up from kz-table.xlsx
+
+    **Example:**
+    ```json
+    {
+        "manufacturer": "Hyundai",
+        "model": "Sonata",
+        "price_krw": 25000000,
+        "year": 2020,
+        "engine_volume": 2.0
+    }
+    ```
+
+    **Returns:**
+    - turnkey_price_kzt: Final price in Almaty (KZT)
+    - turnkey_price_usd: Final price in USD
+    - breakdown: Detailed cost breakdown
+    """
+    try:
+        logger.info(
+            f"Kazakhstan customs calculation: {request.manufacturer} {request.model} "
+            f"{request.price_krw} KRW, {request.year}, {request.engine_volume}L"
+        )
+
+        result = kazakhstan_customs_service.calculate_turnkey_price(request)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=400,
+                detail=result.error or "Calculation failed",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in Kazakhstan customs calculation: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}",
+        )
+
+
+# ============================================================================
 # KBChaChaCha API Endpoints
 # ============================================================================
 
