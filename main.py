@@ -1441,6 +1441,28 @@ from services.exchange_rate_service import exchange_rate_service
 from services.kz_price_table_service import kz_price_table_service
 
 
+# Startup validation
+@app.on_event("startup")
+async def validate_services():
+    """Validate that critical services are properly initialized"""
+    warnings = []
+
+    if not kz_price_table_service.is_loaded:
+        warnings.append("⚠️  KZ price table not loaded - Kazakhstan calculations will fail")
+
+    if exchange_rate_service.service is None:
+        warnings.append("⚠️  Google Sheets API not configured - using fallback exchange rates")
+
+    if warnings:
+        print("\n" + "="*60)
+        print("SERVICE INITIALIZATION WARNINGS:")
+        for warning in warnings:
+            print(f"  {warning}")
+        print("="*60 + "\n")
+    else:
+        print("✅ All services initialized successfully")
+
+
 @app.get("/api/exchange-rates", response_model=ExchangeRatesResponse)
 async def get_exchange_rates():
     """

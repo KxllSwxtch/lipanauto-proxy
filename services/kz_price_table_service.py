@@ -24,11 +24,15 @@ class KZPriceTableService:
             file_path: Path to kz-table.xlsx file
         """
         if file_path is None:
-            # Default path (one level up from lipanauto-proxy)
+            # Default path (same directory as lipanauto-proxy root for deployment)
+            # services/kz_price_table_service.py → go up to lipanauto-proxy root
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             file_path = os.path.join(base_dir, "kz-table.xlsx")
 
         self.file_path = file_path
+
+        # Log the path being used for debugging
+        print(f"📂 Looking for KZ price table at: {file_path}")
         self.price_data: List[Dict] = []
         self.is_loaded = False
 
@@ -111,7 +115,10 @@ class KZPriceTableService:
             self.is_loaded = True
 
         except Exception as e:
-            print(f"❌ Error loading KZ price table: {e}")
+            print(f"❌ Failed to load KZ price table from: {self.file_path}")
+            print(f"   Error: {e}")
+            print(f"   Working directory: {os.getcwd()}")
+            print(f"   File exists: {os.path.exists(self.file_path)}")
             self.is_loaded = False
 
     def _detect_columns(self, headers: List[str]) -> Dict[str, Optional[int]]:
