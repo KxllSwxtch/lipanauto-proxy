@@ -479,80 +479,74 @@ class Che168Service:
                     success=False
                 )
 
-            # Combine the results into the expected format
-            combined_result = []
-
-            # Add basic info section from car_info
+            # Build a car object from car_info data (matching frontend Che168Car interface)
             if car_info_response.result:
-                from schemas.bravomotors import Che168CarDetailSection, Che168CarDetailItem
-
                 info_data = car_info_response.result
-                basic_info_items = []
 
-                # Map important fields from car info
-                field_mapping = [
-                    ("carname", "车型"),
-                    ("brandname", "品牌"),
-                    ("seriesname", "车系"),
-                    ("cname", "城市"),
-                    ("price", "价格(万元)"),
-                    ("mileage", "里程(万公里)"),
-                    ("firstregyear", "首次上牌"),
-                    ("displacement", "排量"),
-                    ("gearbox", "变速箱"),
-                    ("environmental", "排放标准"),
-                    ("colorname", "颜色"),
-                    ("transfercount", "过户次数"),
-                ]
+                # Extract image URLs from picList
+                pic_list = info_data.get('picList', [])
+                image_url = pic_list[0] if pic_list else ""
 
-                for field_key, field_label in field_mapping:
-                    if field_key in info_data and info_data[field_key]:
-                        basic_info_items.append(Che168CarDetailItem(
-                            name=field_label,
-                            content=str(info_data[field_key]),
-                            countline=1
-                        ))
+                # Create a car object that matches the frontend Che168Car interface
+                car_object = {
+                    "infoid": info_data.get('infoid', 0),
+                    "carname": info_data.get('carname', ''),
+                    "cname": info_data.get('cname', ''),
+                    "dealerid": info_data.get('dealerid', 0),
+                    "mileage": str(info_data.get('mileage', '')),
+                    "cityid": info_data.get('cityid', 0),
+                    "seriesid": info_data.get('seriesid', 0),
+                    "specid": info_data.get('specid', 0),
+                    "sname": info_data.get('sname', ''),
+                    "syname": info_data.get('syname', ''),
+                    "price": str(info_data.get('price', '')),
+                    "saveprice": str(info_data.get('saveprice', '')),
+                    "discount": str(info_data.get('discount', '')),
+                    "firstregyear": str(info_data.get('firstregyear', '')),
+                    "imageurl": image_url,
+                    "displacement": info_data.get('displacement', ''),
+                    "environmental": info_data.get('environmental', ''),
+                    "brandname": info_data.get('brandname', ''),
+                    "seriesname": info_data.get('seriesname', ''),
+                    "countyname": info_data.get('countyname', ''),
+                    "firstregdate": info_data.get('firstregdate', ''),
+                    "picList": pic_list,
+                    "gearbox": info_data.get('gearbox', ''),
+                    "colorname": info_data.get('colorname', ''),
+                    "transfercount": info_data.get('transfercount', 0),
+                    "fromtype": info_data.get('fromtype', 0),
+                    "cartype": info_data.get('cartype', 0),
+                    "bucket": info_data.get('bucket', 0),
+                    "isunion": info_data.get('isunion', 0),
+                    "isoutsite": info_data.get('isoutsite', 0),
+                    "videourl": info_data.get('videourl', ''),
+                    "car_level": info_data.get('car_level', 0),
+                    "dealer_level": str(info_data.get('dealer_level', '')),
+                    "downpayment": str(info_data.get('downpayment', '')),
+                    "url": info_data.get('url', ''),
+                    "position": info_data.get('position', 0),
+                    "isnewly": info_data.get('isnewly', 0),
+                    "kindname": info_data.get('kindname', ''),
+                    "photocount": info_data.get('photocount', 0),
+                }
 
-                if basic_info_items:
-                    combined_result.append(Che168CarDetailSection(
-                        title="基本信息",
-                        data=basic_info_items
-                    ))
+                # Add parameter sections as a separate field for UI rendering
+                param_sections = []
+                if car_params_response.returncode == 0 and car_params_response.result:
+                    param_sections = car_params_response.result
 
-            # Add parameter sections from car_params
-            if car_params_response.returncode == 0 and car_params_response.result:
-                from schemas.bravomotors import Che168CarDetailSection, Che168CarDetailItem
-
-                for param_group in car_params_response.result:
-                    if isinstance(param_group, dict) and 'title' in param_group and 'data' in param_group:
-                        param_items = []
-                        for item in param_group['data']:
-                            if isinstance(item, dict) and 'name' in item and 'content' in item:
-                                param_items.append(Che168CarDetailItem(
-                                    name=item['name'],
-                                    content=item['content'],
-                                    countline=item.get('countline', 1)
-                                ))
-
-                        if param_items:
-                            combined_result.append(Che168CarDetailSection(
-                                title=param_group['title'],
-                                data=param_items
-                            ))
-
-            # Return combined response
-            if combined_result:
+                # Return response with car object in result.car format (matching frontend expectations)
                 return Che168CarDetailResponse(
                     returncode=0,
                     message="Success",
-                    result=combined_result,
+                    result={"car": car_object, "params": param_sections},
                     success=True
                 )
             else:
                 return Che168CarDetailResponse(
                     returncode=404,
                     message="No car details found",
-                    result=[],
+                    result={},
                     success=False
                 )
 
@@ -922,8 +916,11 @@ class Che168Service:
                 "_appid": "2sc.m"
             }
 
-            # Use direct request for v2 API (no signature required)
-            response = self.session.get(url, params=params)
+            # Use proxy client to avoid 514 rate limiting errors
+            if self.proxy_client and hasattr(self.proxy_client, 'session'):
+                response = self.proxy_client.session.get(url, params=params)
+            else:
+                response = self.session.get(url, params=params)
             response.raise_for_status()
             json_data = response.json()
 
@@ -969,8 +966,11 @@ class Che168Service:
                 "_appid": "2sc.m"
             }
 
-            # Use direct request for v2 API (no signature required)
-            response = self.session.get(url, params=params)
+            # Use proxy client to avoid 514 rate limiting errors
+            if self.proxy_client and hasattr(self.proxy_client, 'session'):
+                response = self.proxy_client.session.get(url, params=params)
+            else:
+                response = self.session.get(url, params=params)
             response.raise_for_status()
             json_data = response.json()
 

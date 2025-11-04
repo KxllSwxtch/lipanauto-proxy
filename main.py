@@ -364,7 +364,8 @@ vlb_customs_service = VLBCustomsService(proxy_client=None)
 kbchachacha_service = KBChaChaService(proxy_client)
 # Initialize BravoMotors service WITH proxy for Chinese site access
 bravomotors_service = BravoMotorsService(proxy_client)
-che168_service = Che168Service(None)
+# Initialize Che168 service WITH proxy for Chinese site access (fixes 514 rate limiting)
+che168_service = Che168Service(proxy_client)
 
 
 @app.on_event("shutdown")
@@ -2536,12 +2537,27 @@ async def get_che168_car_detail(info_id: int):
                 status_code=503,
                 detail="Che168 service temporarily unavailable - please try again later"
             )
-        else:
-            # Other errors - return 500
+        elif result.returncode == 514:
+            # Rate limiting error - now fixed with proxy support
             raise HTTPException(
-                status_code=500,
-                detail=f"Failed to fetch car details: {result.message}"
+                status_code=429,
+                detail="Too many requests to Che168 - please try again in a moment"
             )
+        else:
+            # Other errors - check if it's a rate limiting message
+            error_msg = result.message or "Unknown error"
+            if "514" in error_msg or "Frequency Capped" in error_msg:
+                # Rate limiting detected in error message
+                raise HTTPException(
+                    status_code=429,
+                    detail="Che168 rate limit reached - retrying with proxy. Please refresh the page."
+                )
+            else:
+                # Other errors - return 500
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to fetch car details: {error_msg}"
+                )
 
     except HTTPException:
         # Re-raise HTTP exceptions
