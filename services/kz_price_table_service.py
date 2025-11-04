@@ -87,8 +87,9 @@ class KZPriceTableService:
                         continue
 
                     # Convert to appropriate types
-                    # Round volume to 1 decimal place to match table format (e.g., 2.998 → 3.0)
-                    volume = round(float(volume), 1) if volume else None
+                    # Convert volume from cubic centimeters (cc) to liters (L) and round to 1 decimal place
+                    # Excel table stores as cc (e.g., 3000), API uses liters (e.g., 3.0)
+                    volume = round(float(volume) / 1000, 1) if volume else None
                     year = int(year) if year else None
                     price_usd = float(price_usd) if price_usd else None
 
