@@ -1,4 +1,6 @@
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import asyncio
 import random
 import time
@@ -154,6 +156,25 @@ class EncarProxyClient:
         self.session.timeout = (10, 30)  # connect timeout, read timeout
         self.session.max_redirects = 3
 
+        # Connection pooling with retry strategy
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+        )
+
+        adapter = HTTPAdapter(
+            pool_connections=20,
+            pool_maxsize=100,
+            max_retries=retry_strategy,
+            pool_block=False
+        )
+
+        # Mount adapter for both HTTP and HTTPS
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
         # Устанавливаем первый residential прокси
         self._rotate_proxy()
 
@@ -223,17 +244,36 @@ class EncarProxyClient:
         self.session.timeout = (10, 30)
         self.session.max_redirects = 3
 
+        # Connection pooling with retry strategy
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+        )
+
+        adapter = HTTPAdapter(
+            pool_connections=20,
+            pool_maxsize=100,
+            max_retries=retry_strategy,
+            pool_block=False
+        )
+
+        # Mount adapter for both HTTP and HTTPS
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
         # Принудительно меняем прокси на следующий
         self._rotate_proxy()
         self.session_rotation_count += 1
 
         logger.info(f"New session created (rotation #{self.session_rotation_count})")
 
-    def _rate_limit(self):
-        """Простая защита от rate limiting"""
+    async def _rate_limit(self):
+        """Простая защита от rate limiting (async-compatible)"""
         current_time = time.time()
         if current_time - self.last_request_time < 0.5:  # Минимум 500ms между запросами
-            time.sleep(0.5 - (current_time - self.last_request_time))
+            await asyncio.sleep(0.5 - (current_time - self.last_request_time))
         self.last_request_time = time.time()
 
         # Каждые 15 запросов - ротация прокси для избежания rate limits
@@ -253,7 +293,7 @@ class EncarProxyClient:
         for attempt in range(max_retries):
             try:
                 # Rate limiting
-                self._rate_limit()
+                await self._rate_limit()
 
                 # Получаем свежие заголовки
                 headers = self._get_dynamic_headers()
@@ -1334,7 +1374,7 @@ async def get_customs_optimization_status():
     Returns information about CAPTCHA caching, background solving, and performance metrics
     """
     try:
-        return customs_service.get_optimization_status()
+        return await customs_service.get_optimization_status()
     except Exception as e:
         logger.error(f"Error getting optimization status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -1350,7 +1390,7 @@ async def get_customs_cache_stats():
     try:
         return {
             "success": True,
-            "cache_stats": customs_service.get_cache_stats(),
+            "cache_stats": await customs_service.get_cache_stats(),
             "note": "CAPTCHA tokens are cached for up to 10 minutes or 5 uses each",
         }
     except Exception as e:

@@ -10,9 +10,10 @@ import asyncio
 import logging
 from typing import Dict, Optional, Any, List
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from urllib.parse import urlencode
 from datetime import datetime, timedelta
-import threading
 from dataclasses import dataclass
 
 from schemas.customs import (
@@ -84,13 +85,13 @@ class CustomsCalculatorService:
 
         # OPTIMIZATION: CAPTCHA token cache
         self.captcha_cache: List[CachedCaptchaToken] = []
-        self.cache_lock = threading.Lock()
+        self.cache_lock = asyncio.Lock()  # ✅ OPTIMIZATION: async lock
         self.min_cached_tokens = 2  # Reduced from 3 to 2 for faster updates
         self.max_cached_tokens = 5  # Reduced from 10 to 5 to keep tokens fresh
 
         # Background task for pre-solving CAPTCHA
         self.background_task_running = False
-        self._start_background_captcha_solver()
+        self.captcha_task = None  # Will be started lazily on first async call
 
         # Performance metrics
         self.stats = {
@@ -138,22 +139,39 @@ class CustomsCalculatorService:
         # Set timeout
         self.session.timeout = (10, 30)
 
-    def _start_background_captcha_solver(self):
-        """Start background thread for pre-solving CAPTCHA tokens"""
-        if not self.background_task_running:
-            self.background_task_running = True
-            background_thread = threading.Thread(
-                target=self._background_captcha_loop, daemon=True
-            )
-            background_thread.start()
-            logger.info("🚀 Background CAPTCHA solver started")
+        # ✅ OPTIMIZATION: Add connection pooling
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+        )
 
-    def _background_captcha_loop(self):
-        """Background loop to maintain cached CAPTCHA tokens"""
+        adapter = HTTPAdapter(
+            pool_connections=20,
+            pool_maxsize=100,
+            max_retries=retry_strategy,
+            pool_block=False
+        )
+
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        logger.info("✅ Connection pooling configured (20/100)")
+
+    def _ensure_background_task_started(self):
+        """Ensure background task is started (lazy initialization)"""
+        if not self.background_task_running and self.captcha_task is None:
+            self.background_task_running = True
+            # ✅ OPTIMIZATION: Use asyncio.create_task instead of threading
+            self.captcha_task = asyncio.create_task(self._background_captcha_loop())
+            logger.info("🚀 Background CAPTCHA solver started (async - lazy init)")
+
+    async def _background_captcha_loop(self):
+        """Background loop to maintain cached CAPTCHA tokens - ASYNC"""
         while self.background_task_running:
             try:
                 # Clean expired tokens
-                self._clean_expired_tokens()
+                await self._clean_expired_tokens()
 
                 # Check if we need more tokens
                 active_tokens = len([t for t in self.captcha_cache if not t.is_expired])
@@ -166,17 +184,12 @@ class CustomsCalculatorService:
                         if len(self.captcha_cache) >= self.max_cached_tokens:
                             break
 
-                        # Solve CAPTCHA in background
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-
+                        # ✅ OPTIMIZATION: Solve CAPTCHA asynchronously (no event loop needed)
                         try:
-                            solution = loop.run_until_complete(
-                                self._solve_captcha_internal(self.recaptcha_site_key)
-                            )
+                            solution = await self._solve_captcha_internal(self.recaptcha_site_key)
 
                             if solution.success:
-                                with self.cache_lock:
+                                async with self.cache_lock:
                                     cached_token = CachedCaptchaToken(
                                         token=solution.solution,
                                         created_at=datetime.now(),
@@ -194,19 +207,17 @@ class CustomsCalculatorService:
 
                         except Exception as e:
                             logger.error(f"Background CAPTCHA solving error: {str(e)}")
-                        finally:
-                            loop.close()
 
-                # Sleep before next check
-                time.sleep(30)  # Check every 30 seconds
+                # ✅ OPTIMIZATION: Non-blocking sleep
+                await asyncio.sleep(30)  # Check every 30 seconds
 
             except Exception as e:
                 logger.error(f"Background CAPTCHA loop error: {str(e)}")
-                time.sleep(60)  # Wait longer on error
+                await asyncio.sleep(60)  # Wait longer on error
 
-    def _clean_expired_tokens(self):
-        """Remove expired tokens from cache"""
-        with self.cache_lock:
+    async def _clean_expired_tokens(self):
+        """Remove expired tokens from cache - ASYNC"""
+        async with self.cache_lock:
             before_count = len(self.captcha_cache)
             self.captcha_cache = [t for t in self.captcha_cache if not t.is_expired]
             after_count = len(self.captcha_cache)
@@ -216,18 +227,18 @@ class CustomsCalculatorService:
                     f"🧹 Cleaned {before_count - after_count} expired CAPTCHA tokens"
                 )
 
-    def _invalidate_all_tokens(self):
-        """Invalidate all cached tokens (used when CAPTCHA error detected)"""
-        with self.cache_lock:
+    async def _invalidate_all_tokens(self):
+        """Invalidate all cached tokens (used when CAPTCHA error detected) - ASYNC"""
+        async with self.cache_lock:
             count = len(self.captcha_cache)
             self.captcha_cache = []
             logger.warning(
                 f"🗑️ Invalidated ALL {count} cached CAPTCHA tokens due to error"
             )
 
-    def _get_cached_captcha_token(self) -> Optional[str]:
-        """Get a cached CAPTCHA token if available"""
-        with self.cache_lock:
+    async def _get_cached_captcha_token(self) -> Optional[str]:
+        """Get a cached CAPTCHA token if available - ASYNC"""
+        async with self.cache_lock:
             for token in self.captcha_cache:
                 if not token.is_expired:
                     used_token = token.use_token()
@@ -256,12 +267,15 @@ class CustomsCalculatorService:
         start_time = time.time()
 
         try:
+            # ✅ OPTIMIZATION: Ensure background CAPTCHA solver is running
+            self._ensure_background_task_started()
+
             logger.info(
                 f"Starting OPTIMIZED customs calculation: cost={request.cost}, volume={request.volume}cc"
             )
 
             # Step 1: Try to get cached CAPTCHA token first
-            captcha_solution = self._get_cached_captcha_token()
+            captcha_solution = await self._get_cached_captcha_token()
 
             if captcha_solution:
                 logger.info("⚡ Using cached CAPTCHA token - FAST PATH")
@@ -328,7 +342,7 @@ class CustomsCalculatorService:
                     != getattr(
                         locals().get("captcha_response", object()), "solution", None
                     ),
-                    "cache_stats": self.get_cache_stats(),
+                    "cache_stats": await self.get_cache_stats(),
                 }
             else:
                 logger.error(
@@ -347,7 +361,7 @@ class CustomsCalculatorService:
                                 "solution",
                                 None,
                             ),
-                            "cache_stats": self.get_cache_stats(),
+                            "cache_stats": await self.get_cache_stats(),
                         },
                         "debug_info": {
                             "captcha_solution_length": (
@@ -378,7 +392,7 @@ class CustomsCalculatorService:
                     "step": "general_error",
                     "optimization": {
                         "response_time": f"{response_time:.1f}s",
-                        "cache_stats": self.get_cache_stats(),
+                        "cache_stats": await self.get_cache_stats(),
                     },
                     "exception_type": type(e).__name__,
                     "exception_details": str(e),
@@ -656,7 +670,7 @@ class CustomsCalculatorService:
                 )
 
                 # Invalidate all cached tokens as they're likely expired
-                self._invalidate_all_tokens()
+                await self._invalidate_all_tokens()
 
                 # Save HTML for debugging (only in development/debug mode)
                 if os.getenv("DEBUG", "").lower() == "true":
@@ -768,9 +782,9 @@ class CustomsCalculatorService:
             logger.error(f"Failed to get CapSolver balance: {str(e)}")
             return {"success": False, "error": str(e)}
 
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Get statistics about the CAPTCHA cache"""
-        with self.cache_lock:
+    async def get_cache_stats(self) -> Dict[str, Any]:
+        """Get statistics about the CAPTCHA cache - ASYNC"""
+        async with self.cache_lock:
             active_tokens = len([t for t in self.captcha_cache if not t.is_expired])
             total_tokens = len(self.captcha_cache)
 
@@ -784,8 +798,8 @@ class CustomsCalculatorService:
             "cache_hit_rate": f"{(self.stats['cache_hits'] / max(1, self.stats['cache_hits'] + self.stats['cache_misses'])) * 100:.1f}%",
         }
 
-    def get_optimization_status(self) -> Dict[str, Any]:
-        """Get detailed optimization status"""
+    async def get_optimization_status(self) -> Dict[str, Any]:
+        """Get detailed optimization status - ASYNC"""
         return {
             "optimization_enabled": True,
             "background_solver_running": self.background_task_running,
@@ -796,5 +810,5 @@ class CustomsCalculatorService:
                 "max_uses_per_token": 3,
             },
             "performance_improvement": "Up to 90% faster (< 2s vs 17s)",
-            "cache_stats": self.get_cache_stats(),
+            "cache_stats": await self.get_cache_stats(),
         }

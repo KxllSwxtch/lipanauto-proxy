@@ -6,11 +6,14 @@ Business logic layer for Korean car marketplace integration
 import json
 import logging
 import time
+import asyncio
 import random
 from typing import Dict, Any, Optional, List
 from urllib.parse import urlencode
 import requests
+from requests.adapters import HTTPAdapter
 from requests.exceptions import RequestException, Timeout
+from urllib3.util.retry import Retry
 
 from parsers.kbchachacha_parser import KBChaChaParser
 from schemas.kbchachacha import (
@@ -54,7 +57,7 @@ class KBChaChaService:
         self.session_cookies = {}
 
     def _setup_session(self):
-        """Setup session with Korean site requirements"""
+        """Setup session with Korean site requirements and connection pooling"""
         # Korean site specific headers
         self.session.headers.update(
             {
@@ -77,18 +80,37 @@ class KBChaChaService:
         self.session.timeout = (10, 30)  # connect, read timeout
         self.session.max_redirects = 3
 
-    def _rate_limit(self):
-        """Rate limiting to avoid being blocked"""
+        # Connection pooling with retry strategy
+        retry_strategy = Retry(
+            total=3,  # Total number of retries
+            backoff_factor=1,  # Exponential backoff: {backoff factor} * (2 ** ({number of total retries} - 1))
+            status_forcelist=[429, 500, 502, 503, 504],  # Retry on these status codes
+            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+        )
+
+        adapter = HTTPAdapter(
+            pool_connections=20,  # Number of connection pools to cache
+            pool_maxsize=100,  # Max number of connections to save in the pool
+            max_retries=retry_strategy,
+            pool_block=False  # Don't block if pool is full
+        )
+
+        # Mount adapter for both HTTP and HTTPS
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
+    async def _rate_limit(self):
+        """Rate limiting to avoid being blocked (async-compatible)"""
         current_time = time.time()
         if current_time - self.last_request_time < 1.0:  # 1 second between requests
-            time.sleep(1.0 - (current_time - self.last_request_time))
+            await asyncio.sleep(1.0 - (current_time - self.last_request_time))
 
         self.last_request_time = time.time()
         self.request_count += 1
 
         # Add random delay occasionally
         if self.request_count % 10 == 0:
-            time.sleep(random.uniform(0.5, 2.0))
+            await asyncio.sleep(random.uniform(0.5, 2.0))
 
     async def _make_request(
         self, url: str, params: Dict = None, use_proxy: bool = False
@@ -104,7 +126,7 @@ class KBChaChaService:
         Returns:
             Dict with response data
         """
-        self._rate_limit()
+        await self._rate_limit()
 
         for attempt in range(3):  # Max 3 attempts
             try:

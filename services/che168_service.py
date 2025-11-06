@@ -13,6 +13,8 @@ import hmac
 from typing import Dict, Any, Optional, List
 from urllib.parse import urlencode
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from requests.exceptions import RequestException, Timeout, ConnectionError
 
 from parsers.bravomotors_parser import Che168Parser
@@ -131,24 +133,43 @@ class Che168Service:
         self.session.timeout = (10, 30)  # connect, read timeout
         self.session.max_redirects = 3
 
+        # Connection pooling with retry strategy
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+        )
+
+        adapter = HTTPAdapter(
+            pool_connections=20,
+            pool_maxsize=100,
+            max_retries=retry_strategy,
+            pool_block=False
+        )
+
+        # Mount adapter for both HTTP and HTTPS
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
         # Cache for brands/models/years to reduce API calls
         self.brands_cache = None
         self.brands_cache_time = 0
         self.models_cache = {}
         self.years_cache = {}
 
-    def _rate_limit(self):
-        """Rate limiting to avoid being blocked"""
+    async def _rate_limit(self):
+        """Rate limiting to avoid being blocked (async-compatible)"""
         current_time = time.time()
         if current_time - self.last_request_time < 0.5:  # 500ms between requests
-            time.sleep(0.5 - (current_time - self.last_request_time))
+            await asyncio.sleep(0.5 - (current_time - self.last_request_time))
 
         self.last_request_time = time.time()
         self.request_count += 1
 
         # Add random delay occasionally
         if self.request_count % 20 == 0:
-            time.sleep(random.uniform(1.0, 3.0))
+            await asyncio.sleep(random.uniform(1.0, 3.0))
 
     def _generate_sign(self, params: Dict[str, Any]) -> str:
         """
@@ -234,7 +255,7 @@ class Che168Service:
         Returns:
             JSON response data
         """
-        self._rate_limit()
+        await self._rate_limit()
 
         if params is None:
             params = {}
