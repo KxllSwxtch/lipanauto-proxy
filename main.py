@@ -95,11 +95,11 @@ app.add_middleware(
 # Конфигурация residential прокси
 PROXY_CONFIGS = [
     {
-        "name": "Decodo Proxy",
-        "proxy": "gate.decodo.com:10001",
-        "auth": "sps3kthh42:IP2tq5c~eja4lSZ3kd",
+        "name": "Oxylabs Korea",
+        "proxy": "pr.oxylabs.io:7777",
+        "auth": "customer-tiksanauto_4qVdj-cc-kr:Tiksanauto_2025",
         "location": "South Korea",
-        "provider": "decodo",
+        "provider": "oxylabs",
     },
 ]
 
