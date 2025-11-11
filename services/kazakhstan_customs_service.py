@@ -100,6 +100,24 @@ class KazakhstanCustomsService:
             # === STEP 3: Customs Calculation (calculator.ida.kz formula) ===
             customs_price_kzt = customs_price_usd * (usd_krw_rate / kzt_krw_rate)
 
+            print(f"\n{'='*60}")
+            print(f"🧮 KAZAKHSTAN CUSTOMS CALCULATION")
+            print(f"{'='*60}")
+            print(f"Vehicle: {request.manufacturer} {request.model} {request.year}")
+            print(f"Engine: {request.engine_volume}L ({request.engine_volume * 1000:.0f}cc)")
+            print(f"\n📊 EXCHANGE RATES:")
+            print(f"  USD/KRW: {usd_krw_rate:,.2f}")
+            print(f"  KZT/KRW: {kzt_krw_rate:.4f}")
+            print(f"  USD/KZT: {usd_krw_rate / kzt_krw_rate:,.2f}")
+            print(f"\n💰 KOREA EXPENSES:")
+            print(f"  Car price (KRW): {request.price_krw:,.0f}")
+            print(f"  Parking fee (KRW): {self.PARKING_FEE_KRW:,.0f}")
+            print(f"  Transportation (KRW): {self.TRANSPORTATION_KOREA_KRW:,.0f}")
+            print(f"  Export docs (KRW): {self.EXPORT_DOCS_KRW:,.0f}")
+            print(f"  Freight (USD): ${self.FREIGHT_USD:,.0f} = {freight_krw:,.0f} KRW")
+            print(f"  Total Korea (KRW): {total_korea_krw:,.0f}")
+            print(f"  Total Korea (KZT): {total_korea_kzt:,.2f}")
+
             # Customs duty = price * 15%
             customs_duty = customs_price_kzt * self.CUSTOMS_DUTY_RATE
 
@@ -115,24 +133,53 @@ class KazakhstanCustomsService:
 
             # Registration fee (based on car age)
             current_year = datetime.now().year
-            registration_fee = self._calculate_registration_fee(
-                current_year - request.year
-            )
+            car_age = current_year - request.year
+            registration_fee = self._calculate_registration_fee(car_age)
+
+            print(f"\n🚢 CUSTOMS CALCULATION (calculator.ida.kz formula):")
+            print(f"  Customs price (USD): ${customs_price_usd:,.2f}")
+            print(f"  Customs price (KZT): {customs_price_kzt:,.2f}")
+            print(f"  Customs duty (15%): {customs_duty:,.2f}")
+            print(f"  Excise ({'>= 3000cc' if volume_cc >= 3000 else '< 3000cc'}): {excise:,.2f}")
+            print(f"  VAT base: {customs_price_kzt:,.2f} + {self.CUSTOMS_FEE:,.0f} + {excise:,.2f}")
+            print(f"  VAT (12%): {vat:,.2f}")
+            print(f"  Utilization fee ({volume_cc:.0f}cc): {utilization_fee:,.2f}")
+            print(f"  Registration fee (age {car_age}): {registration_fee:,.2f}")
 
             # === STEP 4: Total Customs ===
             total_customs = customs_duty + vat + excise
             total_expenses = total_customs + utilization_fee + registration_fee
+
+            print(f"\n📋 TOTALS:")
+            print(f"  Total customs (duty + VAT + excise): {total_customs:,.2f} KZT")
+            print(f"  Total KZ expenses (customs + util + reg): {total_expenses:,.2f} KZT")
 
             # === STEP 5: Company Commission ===
             company_commission_kzt = self.COMPANY_COMMISSION_USD * (
                 usd_krw_rate / kzt_krw_rate
             )
 
+            print(f"\n💼 COMPANY COMMISSION:")
+            print(f"  Commission (USD): ${self.COMPANY_COMMISSION_USD:,.0f}")
+            print(f"  Commission (KZT): {company_commission_kzt:,.2f}")
+
             # === STEP 6: Final Turnkey Price ===
+            # Note: customs_price_kzt is NOT added separately because customs duties
+            # (calculated as 15% of customs_price_kzt) are already included in total_expenses
+            # This matches calculator.ida.kz formula: final = base + duties + fees
             final_price_kzt = (
-                total_korea_kzt + customs_price_kzt + total_expenses + company_commission_kzt
+                total_korea_kzt + total_expenses + company_commission_kzt
             )
             final_price_usd = final_price_kzt / (usd_krw_rate / kzt_krw_rate)
+
+            print(f"\n🎯 FINAL TURNKEY PRICE:")
+            print(f"  Korea expenses: {total_korea_kzt:,.2f} KZT")
+            print(f"  + KZ expenses: {total_expenses:,.2f} KZT")
+            print(f"  + Commission: {company_commission_kzt:,.2f} KZT")
+            print(f"  {'='*40}")
+            print(f"  TOTAL (KZT): {final_price_kzt:,.2f} ₸")
+            print(f"  TOTAL (USD): ${final_price_usd:,.2f}")
+            print(f"{'='*60}\n")
 
             # Build detailed breakdown
             breakdown = KZCalculationBreakdown(
@@ -186,18 +233,20 @@ class KazakhstanCustomsService:
         """
         Calculate utilization fee based on engine volume
 
-        From KAZAKHSTAN.md formula:
+        From calculator.ida.kz formula (EXACT match):
         - 1001-2000cc: 603,750 KZT
         - 2001-3000cc: 862,500 KZT
-        - 3001+cc: 1,983,750 KZT
+        - Other volumes (≤1000cc OR >3000cc): 1,983,750 KZT
+
+        Note: Small engines (≤1000cc) and large engines (>3000cc)
+        both have the highest recycling fee per Kazakhstan policy
         """
-        if volume_cc <= 1000:
-            return 0
-        elif volume_cc <= 2000:
+        if 1001 <= volume_cc <= 2000:
             return 603_750
-        elif volume_cc <= 3000:
+        elif 2001 <= volume_cc <= 3000:
             return 862_500
         else:
+            # All other volumes: ≤1000cc OR >3000cc
             return 1_983_750
 
     def _calculate_registration_fee(self, age: int) -> float:
