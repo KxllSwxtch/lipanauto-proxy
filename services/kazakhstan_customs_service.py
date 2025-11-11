@@ -13,6 +13,7 @@ from schemas.kazakhstan import (
 )
 from services.exchange_rate_service import exchange_rate_service
 from services.kz_price_table_service import kz_price_table_service
+from services.kz_model_name_mapper import kz_model_name_mapper
 
 
 class KazakhstanCustomsService:
@@ -66,9 +67,15 @@ class KazakhstanCustomsService:
             # Get customs price (USD) from kz-table.xlsx if not provided
             customs_price_usd = request.price_usd_for_customs
             if customs_price_usd is None:
+                # Map model name to kz-table.xlsx format
+                mapped_model = kz_model_name_mapper.map_model_name(
+                    manufacturer=request.manufacturer,
+                    model=request.model
+                )
+
                 customs_price_usd = self.price_table_service.lookup_price(
                     manufacturer=request.manufacturer,
-                    model=request.model,
+                    model=mapped_model,
                     volume=request.engine_volume,
                     year=request.year,
                 )
@@ -78,7 +85,7 @@ class KazakhstanCustomsService:
                         success=False,
                         error=(
                             f"Could not find price for {request.manufacturer} {request.model} "
-                            f"{request.engine_volume}L {request.year} in KZ price table"
+                            f"(mapped: {mapped_model}) {request.engine_volume}L {request.year} in KZ price table"
                         ),
                         vehicle_info=request.dict(),
                     )
