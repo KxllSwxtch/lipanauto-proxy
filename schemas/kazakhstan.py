@@ -119,6 +119,27 @@ class ExchangeRatesResponse(BaseModel):
     error: Optional[str] = Field(None, description="Error message if failed")
 
 
+class CNYRatesData(BaseModel):
+    """CNY currency rates data"""
+
+    cnyToUsd: float = Field(..., description="CNY to USD rate (1 CNY = X USD)")
+    cnyToRub: float = Field(..., description="CNY to RUB rate (1 CNY = X RUB)")
+    cnyToKzt: float = Field(..., description="CNY to KZT rate (1 CNY = X KZT)")
+
+
+class CNYRatesResponse(BaseModel):
+    """Response for CNY currency rates endpoint"""
+
+    success: bool = Field(..., description="Whether rates were fetched successfully")
+    data: Optional[CNYRatesData] = Field(None, description="CNY exchange rates")
+    timestamp: Optional[float] = Field(None, description="Unix timestamp of rates")
+    is_fallback: bool = Field(
+        default=False,
+        description="Whether fallback rates were used (Google Sheets unavailable)"
+    )
+    error: Optional[str] = Field(None, description="Error message if failed")
+
+
 class KZPriceLookupRequest(BaseModel):
     """Request for KZ price table lookup"""
 

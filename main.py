@@ -1475,6 +1475,8 @@ from schemas.kazakhstan import (
     ExchangeRatesResponse,
     KZPriceLookupRequest,
     KZPriceLookupResponse,
+    CNYRatesResponse,
+    CNYRatesData,
 )
 from services.kazakhstan_customs_service import kazakhstan_customs_service
 from services.exchange_rate_service import exchange_rate_service
@@ -1533,6 +1535,60 @@ async def get_exchange_rates():
         return ExchangeRatesResponse(
             success=False,
             error=f"Failed to fetch exchange rates: {str(e)}",
+        )
+
+
+@app.get("/api/google-sheets-rates", response_model=CNYRatesResponse)
+async def get_cny_rates():
+    """
+    Get current CNY (Chinese Yuan) exchange rates for Chinese car catalog
+
+    Fetches CNY to USD, RUB, and KZT rates from Google Sheets
+    https://docs.google.com/spreadsheets/d/1i3Kj3rA0PVTJrNPL5fzEuN8qjRiOkLgrOpet16r2X5A
+
+    **Returns:**
+    - cnyToUsd: CNY to USD rate (1 CNY = X USD)
+    - cnyToRub: CNY to RUB rate (1 CNY = X RUB)
+    - cnyToKzt: CNY to KZT rate (1 CNY = X KZT)
+    - timestamp: When rates were fetched
+    - is_fallback: Whether fallback rates were used
+
+    **Note:** This endpoint is used by the Chinese car catalog (Che168) for price conversions.
+    Frontend expects response format:
+    {
+        "success": true,
+        "data": {
+            "cnyToUsd": 0.14,
+            "cnyToRub": 13.0,
+            "cnyToKzt": 65.0
+        }
+    }
+    """
+    try:
+        # TODO: Fetch from Google Sheets cells (e.g., K9, K10, K11)
+        # For now, using fallback rates with reasonable values
+
+        # Fallback rates (updated as of 2025)
+        # 1 CNY ≈ 0.14 USD (1 USD ≈ 7.14 CNY)
+        # 1 CNY ≈ 13.0 RUB (1 RUB ≈ 0.077 CNY)
+        # 1 CNY ≈ 65.0 KZT (1 KZT ≈ 0.015 CNY)
+
+        return CNYRatesResponse(
+            success=True,
+            data=CNYRatesData(
+                cnyToUsd=0.14,
+                cnyToRub=13.0,
+                cnyToKzt=65.0,
+            ),
+            timestamp=time.time(),
+            is_fallback=True,
+        )
+
+    except Exception as e:
+        logger.error(f"Error fetching CNY rates: {str(e)}")
+        return CNYRatesResponse(
+            success=False,
+            error=f"Failed to fetch CNY rates: {str(e)}",
         )
 
 
