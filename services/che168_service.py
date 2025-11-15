@@ -20,7 +20,6 @@ from requests.exceptions import RequestException, Timeout, ConnectionError
 from parsers.bravomotors_parser import Che168Parser
 from schemas.bravomotors import (
     Che168SearchResponse,
-    Che168CarDetailResponse,
     Che168FiltersResponse,
     Che168SearchFilters,
     Che168BrandsResponse,
@@ -30,6 +29,7 @@ from schemas.che168 import (
     Che168CarInfoResponse,
     Che168CarParamsResponse,
     Che168CarAnalysisResponse,
+    Che168CarDetailResponse,  # Use correct schema from che168
 )
 
 # Import request cache utility
@@ -476,10 +476,9 @@ class Che168Service:
             if isinstance(car_info_response, Exception):
                 logger.error(f"Error fetching car info for {info_id}: {str(car_info_response)}")
                 return Che168CarDetailResponse(
-                    returncode=-1,
-                    message=f"Failed to fetch car info: {str(car_info_response)}",
-                    result=[],
-                    success=False
+                    success=False,
+                    car=None,
+                    error=f"Failed to fetch car info: {str(car_info_response)}"
                 )
 
             if isinstance(car_params_response, Exception):
@@ -494,10 +493,9 @@ class Che168Service:
             # Check if car info is valid
             if car_info_response.returncode != 0:
                 return Che168CarDetailResponse(
-                    returncode=car_info_response.returncode,
-                    message=car_info_response.message or "Car info not found",
-                    result=[],
-                    success=False
+                    success=False,
+                    car=None,
+                    error=car_info_response.message or "Car info not found"
                 )
 
             # Build a car object from car_info data (matching frontend Che168Car interface)
@@ -556,28 +554,25 @@ class Che168Service:
                 if car_params_response.returncode == 0 and car_params_response.result:
                     param_sections = car_params_response.result
 
-                # Return response with car object in result.car format (matching frontend expectations)
+                # Return response with car object (matching frontend expectations)
                 return Che168CarDetailResponse(
-                    returncode=0,
-                    message="Success",
-                    result={"car": car_object, "params": param_sections},
-                    success=True
+                    success=True,
+                    car=car_object,
+                    meta={"params": param_sections}
                 )
             else:
                 return Che168CarDetailResponse(
-                    returncode=404,
-                    message="No car details found",
-                    result={},
-                    success=False
+                    success=False,
+                    car=None,
+                    error="No car details found"
                 )
 
         except Exception as e:
             logger.error(f"Error in get_car_detail for {info_id}: {str(e)}")
             return Che168CarDetailResponse(
-                returncode=-1,
-                message=f"Service error: {str(e)}",
-                result=[],
-                success=False
+                success=False,
+                car=None,
+                error=f"Service error: {str(e)}"
             )
 
     async def get_filters(self) -> Che168FiltersResponse:
