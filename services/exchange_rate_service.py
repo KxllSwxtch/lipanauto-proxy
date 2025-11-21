@@ -13,14 +13,21 @@ from google.auth.transport.requests import Request
 
 class ExchangeRateService:
     """
-    Service to fetch exchange rates from Google Sheets
+    Service to fetch exchange rates from Google Sheets for Kazakhstan calculations
 
     Fetches:
-    - USD/KRW rate from cell K7
-    - KZT/KRW rate from cell K8
+    - USD/KRW rate from cell K7 (e.g., 1469.95 = 1 USD = 1469.95 KRW)
+    - KZT/KRW rate from cell K8 (e.g., 2.8001 = 1 KZT = 2.8001 KRW)
 
     Google Sheets URL:
-    https://docs.google.com/spreadsheets/d/1i3Kj3rA0PVTJrNPL5fzEuN8qjRiOkLgrOpet16r2X5A/edit
+    https://docs.google.com/spreadsheets/d/1i3Kj3rA0PVTJrNPL5fzEuN8qjRiOkLgrOpet16r2X5A/edit?gid=1198819398
+
+    Rate Format:
+    - Rates are in Currency→KRW format (NOT inverted)
+    - To convert KRW to other currencies, use division: krw_amount / rate
+    - To convert other currencies to KRW, use multiplication: currency_amount * rate
+
+    Last Updated: 2025-11-21
     """
 
     def __init__(self):
@@ -109,9 +116,9 @@ class ExchangeRateService:
                 print("⚠️  Invalid data from Google Sheets. Using fallback rates.")
                 return self._get_fallback_rates()
 
-            # Extract rates
-            usd_krw = float(values[0][0]) if values[0] else 1350.0  # K7
-            kzt_krw = float(values[1][0]) if len(values) > 1 and values[1] else 2.7  # K8
+            # Extract rates (with updated fallback values as of 2025-11-21)
+            usd_krw = float(values[0][0]) if values[0] else 1469.95  # K7
+            kzt_krw = float(values[1][0]) if len(values) > 1 and values[1] else 2.8001  # K8
 
             # Update cache
             self.cache = {
@@ -136,11 +143,16 @@ class ExchangeRateService:
         """
         Return fallback exchange rates if Google Sheets fetch fails
 
-        These should be updated manually or use a different API
+        Fallback rates based on Google Sheet values as of 2025-11-21:
+        - USD/KRW: 1469.95 (K7)
+        - KZT/KRW: 2.8001 (K8)
+
+        Format: Currency→KRW (e.g., 1 USD = 1469.95 KRW)
+        These rates are NOT inverted - use division for KRW→Currency conversion
         """
         return {
-            'usd_krw': 1350.0,  # Approximate USD to KRW rate
-            'kzt_krw': 2.7,     # Approximate KZT to KRW rate
+            'usd_krw': 1469.95,  # 1 USD = 1469.95 KRW (updated 2025-11-21)
+            'kzt_krw': 2.8001,   # 1 KZT = 2.8001 KRW (updated 2025-11-21)
             'timestamp': time.time(),
             'fallback': True
         }
