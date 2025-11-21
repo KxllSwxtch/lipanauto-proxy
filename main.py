@@ -35,6 +35,9 @@ from schemas.vlb_customs import (
 )
 from services.vlb_customs_service import VLBCustomsService
 
+# Encar inspection imports
+from schemas.inspection import InspectionDataResponse
+
 # KBChaChaCha imports
 from schemas.kbchachacha import (
     KBMakersResponse,
@@ -543,6 +546,82 @@ async def proxy_nav(
 ):
     """Прокси для навигации с продвинутым обходом защиты"""
     return await handle_api_request("nav", {"count": count, "q": q, "inav": inav})
+
+
+@app.get("/api/encar/inspection/{vehicle_id}", response_model=InspectionDataResponse)
+async def get_inspection_data(
+    vehicle_id: str = Path(..., description="Encar vehicle ID")
+):
+    """
+    Get vehicle inspection data from Encar API with proxy protection
+
+    This endpoint fetches detailed inspection information including:
+    - VIN (Vehicle Identification Number)
+    - Mileage
+    - First registration date
+    - Transmission type
+    - Warranty information
+    - Vehicle condition state
+    - Accident history
+    - Repair history
+
+    **Parameters:**
+    - **vehicle_id**: Encar vehicle identifier
+
+    **Returns:**
+    - InspectionDataResponse with complete inspection details
+
+    **Example:**
+    ```
+    GET /api/encar/inspection/12345678
+    ```
+    """
+    try:
+        # Construct Encar API URL
+        url = f"https://api.encar.com/v1/readside/inspection/vehicle/{vehicle_id}"
+
+        logger.info(f"🔍 Fetching inspection data for vehicle ID: {vehicle_id}")
+
+        # Make request through proxy client with retry logic
+        response_data = await proxy_client.make_request(url, max_retries=3)
+
+        if not response_data.get("success"):
+            error_msg = response_data.get("error", "Unknown error")
+            logger.error(f"❌ Failed to fetch inspection data: {error_msg}")
+
+            # Return 404 if data not found, 502 for other errors
+            if response_data.get("status_code") == 404:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Inspection data not found for vehicle ID: {vehicle_id}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to fetch inspection data: {error_msg}"
+                )
+
+        # Parse JSON response
+        import json
+        try:
+            inspection_data = json.loads(response_data["text"])
+            logger.info(f"✅ Successfully fetched inspection data for vehicle ID: {vehicle_id}")
+            return inspection_data
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Failed to parse inspection data JSON: {str(e)}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to parse inspection data: {str(e)}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error fetching inspection data: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
 
 
 @app.get("/api/bikes", response_model=BikeSearchResponse)
