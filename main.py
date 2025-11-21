@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
 import uuid
+from pydantic import ValidationError
 
 # New imports for bike functionality
 from schemas.bikes import BikeSearchParams, BikeSearchResponse, BikeDetailResponse
@@ -605,10 +606,27 @@ async def get_inspection_data(
         import json
         try:
             inspection_data = json.loads(response_data["text"])
-            logger.info(f"✅ Successfully fetched inspection data for vehicle ID: {vehicle_id}")
-            return inspection_data
+            logger.info(f"✅ Successfully parsed JSON for vehicle ID: {vehicle_id}")
+
+            # Validate response data against schema before returning
+            try:
+                validated_data = InspectionDataResponse(**inspection_data)
+                logger.info(f"✅ Successfully validated inspection data for vehicle ID: {vehicle_id}")
+                return validated_data
+            except ValidationError as ve:
+                # Log detailed validation error with raw response for debugging
+                logger.error(f"❌ Schema validation failed for vehicle ID: {vehicle_id}")
+                logger.error(f"Validation errors: {ve.errors()}")
+                logger.error(f"Raw response data: {json.dumps(inspection_data, indent=2, ensure_ascii=False)[:2000]}")
+
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Encar API returned incomplete or invalid inspection data. Missing or invalid fields: {[err['loc'] for err in ve.errors()]}"
+                )
+
         except json.JSONDecodeError as e:
             logger.error(f"❌ Failed to parse inspection data JSON: {str(e)}")
+            logger.error(f"Raw response text: {response_data['text'][:500]}")
             raise HTTPException(
                 status_code=502,
                 detail=f"Failed to parse inspection data: {str(e)}"
