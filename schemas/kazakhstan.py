@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, validator
 
 
 class KZCalculationRequest(BaseModel):
-    """Request parameters for Kazakhstan customs calculation"""
+    """Request parameters for Kazakhstan turnkey price calculation"""
 
     # Car identification
     manufacturer: str = Field(..., description="Car manufacturer (e.g., Hyundai, Kia)")
@@ -19,12 +19,6 @@ class KZCalculationRequest(BaseModel):
     year: int = Field(..., description="Manufacturing year", ge=1990, le=2030)
     engine_volume: float = Field(..., description="Engine displacement in liters (e.g., 2.0)", gt=0)
 
-    # Optional: if not provided, will be looked up from kz-table.xlsx
-    price_usd_for_customs: Optional[float] = Field(
-        None,
-        description="USD price for customs calculation (from kz-table.xlsx). If not provided, will be looked up automatically."
-    )
-
     @validator("engine_volume")
     def validate_volume(cls, v):
         """Validate engine volume is reasonable"""
@@ -34,40 +28,26 @@ class KZCalculationRequest(BaseModel):
 
 
 class KZCalculationBreakdown(BaseModel):
-    """Detailed breakdown of Kazakhstan costs"""
+    """Detailed breakdown of Kazakhstan turnkey price (Korea expenses + commission only)"""
 
     # Korea expenses (in KRW)
     car_price_krw: float = Field(..., description="Car price in Korea (KRW)")
     parking_fee_krw: float = Field(..., description="Стояночные (Комиссия площадки) - 440,000 KRW")
     transportation_korea_krw: float = Field(..., description="Перегон по Корее - 300,000 KRW")
     export_docs_krw: float = Field(..., description="Подготовка экспортных док. - 60,000 KRW")
-    freight_usd: float = Field(..., description="Фрахт - $2,600")
+    freight_usd: float = Field(..., description="Фрахт - $1,450")
     freight_krw: float = Field(..., description="Freight converted to KRW")
 
     # Total Korea expenses
     total_korea_krw: float = Field(..., description="Total expenses in Korea (KRW)")
     total_korea_kzt: float = Field(..., description="Total Korea expenses in KZT")
 
-    # Customs calculation inputs
-    customs_price_usd: float = Field(..., description="Price used for customs calculation (USD)")
-    customs_price_kzt: float = Field(..., description="Customs price in KZT")
-
-    # Customs duties (from calculator.ida.kz formula)
-    customs_duty: float = Field(..., description="Таможенная пошлина (15%)")
-    excise: float = Field(..., description="Акциз (based on engine volume)")
-    vat: float = Field(..., description="НДС (12%)")
-    utilization_fee: float = Field(..., description="Утильсбор (based on volume)")
-    registration_fee: float = Field(..., description="Первичная регистрация")
-
-    # Totals
-    total_customs: float = Field(..., description="Total customs duties (customs + vat + excise)")
-    total_expenses: float = Field(..., description="Total expenses (customs + util + registration)")
-
-    # Final price
-    company_commission_usd: float = Field(..., description="LipAuto commission ($300)")
+    # Company commission
+    company_commission_usd: float = Field(..., description="LipanAuto commission ($300)")
     company_commission_kzt: float = Field(..., description="Commission in KZT")
 
-    final_price_kzt: float = Field(..., description="Final turnkey price in Almaty (KZT)")
+    # Final turnkey price (Korea expenses + commission)
+    final_price_kzt: float = Field(..., description="Final turnkey price delivered to Kazakhstan (KZT)")
     final_price_usd: float = Field(..., description="Final turnkey price in USD")
 
     # Exchange rates used
@@ -76,13 +56,13 @@ class KZCalculationBreakdown(BaseModel):
 
 
 class KZCalculationResponse(BaseModel):
-    """Complete Kazakhstan calculation response"""
+    """Complete Kazakhstan turnkey price calculation response (Korea expenses + commission)"""
 
     success: bool = Field(..., description="Whether calculation was successful")
 
     # Main result
     turnkey_price_kzt: Optional[float] = Field(
-        None, description="Total turnkey price in Almaty (KZT)"
+        None, description="Total turnkey price delivered to Kazakhstan (KZT)"
     )
     turnkey_price_usd: Optional[float] = Field(
         None, description="Total turnkey price in USD"
