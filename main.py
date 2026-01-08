@@ -1,3 +1,4 @@
+import os
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -96,12 +97,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Конфигурация residential прокси
+# Конфигурация residential прокси (из переменных окружения)
+OXYLABS_PROXY = os.getenv("OXYLABS_PROXY", "kr-pr.oxylabs.io:30000")
+OXYLABS_AUTH = os.getenv("OXYLABS_AUTH", "customer-tiksanauto_M2zEp:Tiksan_auto99")
+
 PROXY_CONFIGS = [
     {
         "name": "Oxylabs Korea",
-        "proxy": "pr.oxylabs.io:7777",
-        "auth": "customer-tiksanauto_4qVdj-cc-kr:Tiksanauto_2025",
+        "proxy": OXYLABS_PROXY,
+        "auth": OXYLABS_AUTH,
         "location": "South Korea",
         "provider": "oxylabs",
     },
