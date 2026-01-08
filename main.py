@@ -1805,6 +1805,200 @@ async def calculate_kazakhstan_customs(request: KZCalculationRequest):
 
 
 # ============================================================================
+# Russian Customs (Pan-Auto.ru & Calcus.ru) API Endpoints
+# ============================================================================
+
+from schemas.customs_russia import (
+    PanAutoCarResponse,
+    CalcusCalculationRequest,
+    CalcusCalculationResponse,
+)
+from services.panauto_service import get_panauto_service
+from services.calcus_service import get_calcus_service
+
+# Initialize services
+panauto_service = get_panauto_service()
+calcus_service = get_calcus_service()
+
+
+@app.get("/api/panauto/car/{car_id}", response_model=PanAutoCarResponse)
+async def get_panauto_car_data(car_id: str):
+    """
+    Get car data from pan-auto.ru including HP and pre-calculated customs
+
+    This endpoint fetches car data from pan-auto.ru (zefir.pan-auto.ru/api/cars/{car_id}/)
+    which includes:
+    - HP (horsepower) value needed for 2026 customs calculations
+    - Pre-calculated customs duties (clearanceCost, utilizationFee, customsDuty)
+    - Full cost breakdown in RUB
+
+    **Use Case:**
+    1. First try this endpoint to get pre-calculated customs
+    2. If HP is available (has_hp=true) and customs data exists (has_customs=true),
+       use these values directly
+    3. If HP is missing, show manual HP input form and use /api/customs/calculate-russia
+
+    **Parameters:**
+    - car_id: Encar car ID (e.g., "40792226")
+
+    **Example Response (success with HP and customs):**
+    ```json
+    {
+        "success": true,
+        "car_id": "40792226",
+        "hp": 381,
+        "displacement": 1991,
+        "form_year": "2017",
+        "has_hp": true,
+        "has_customs": true,
+        "costs_rub": {
+            "clearanceCost": 11746.0,
+            "utilizationFee": 2640000.0,
+            "customsDuty": 880140.0,
+            "finalCost": 5121481.0
+        }
+    }
+    ```
+
+    **Example Response (no HP - need manual input):**
+    ```json
+    {
+        "success": true,
+        "car_id": "40792226",
+        "hp": null,
+        "has_hp": false,
+        "has_customs": false,
+        "error": null
+    }
+    ```
+    """
+    try:
+        logger.info(f"Fetching pan-auto.ru data for car: {car_id}")
+
+        result = await panauto_service.get_car_data(car_id)
+
+        if not result.success and "not found" in (result.error or "").lower():
+            # Car not found is not a server error, return 200 with success=false
+            return result
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error fetching pan-auto.ru data for car {car_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}",
+        )
+
+
+@app.post("/api/customs/calculate-russia", response_model=CalcusCalculationResponse)
+async def calculate_russia_customs(request: CalcusCalculationRequest):
+    """
+    Calculate Russian customs duties via calcus.ru API
+
+    This endpoint is used when pan-auto.ru doesn't have HP data or car not found.
+    User must manually input HP (horsepower) value.
+
+    **IMPORTANT:** Uses year=2026 for calculation as per new Russian customs rules
+    that require HP value for duty calculation.
+
+    **Parameters:**
+    - car_id: Car identifier for tracking
+    - price_krw: Car price in Korean Won (e.g., 222200000 for 22,220,000 KRW)
+    - displacement: Engine volume in cm³ (e.g., 1991)
+    - year: Manufacturing year (e.g., 2017)
+    - power: Engine power in HP (REQUIRED - e.g., 381)
+    - engine_type: "petrol" | "diesel" | "hybrid" | "electric" (default: "petrol")
+    - owner_type: "individual" | "legal" (default: "individual")
+
+    **Example Request:**
+    ```json
+    {
+        "car_id": "40792226",
+        "price_krw": 222200000,
+        "displacement": 1991,
+        "year": 2017,
+        "power": 381,
+        "engine_type": "petrol",
+        "owner_type": "individual"
+    }
+    ```
+
+    **Example Response:**
+    ```json
+    {
+        "success": true,
+        "car_id": "40792226",
+        "customs": {
+            "clearance_cost": 11746.0,
+            "utilization_fee": 2640000.0,
+            "customs_duty": 880140.0,
+            "excise": 0,
+            "vat": 0,
+            "total": 3531886.0
+        },
+        "input_params": {
+            "price_krw": 222200000,
+            "displacement": 1991,
+            "year": 2017,
+            "power": 381,
+            "calculation_year": "2026"
+        }
+    }
+    ```
+    """
+    try:
+        logger.info(
+            f"Russia customs calculation: car={request.car_id}, "
+            f"price={request.price_krw} KRW, displacement={request.displacement}cc, "
+            f"HP={request.power}, year={request.year}"
+        )
+
+        # Validate HP is provided
+        if not request.power or request.power < 1:
+            raise HTTPException(
+                status_code=400,
+                detail="HP (power) value is required for 2026 customs calculation",
+            )
+
+        result = await calcus_service.calculate_customs(request)
+
+        if not result.success:
+            raise HTTPException(
+                status_code=400,
+                detail=result.error or "Customs calculation failed",
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in Russia customs calculation: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}",
+        )
+
+
+@app.get("/api/customs/russia/stats")
+async def get_russia_customs_stats():
+    """
+    Get statistics for Russian customs services (pan-auto.ru and calcus.ru)
+
+    Returns cache hit rates, API call counts, and service performance metrics.
+    """
+    try:
+        return {
+            "panauto": panauto_service.get_service_stats(),
+            "calcus": calcus_service.get_service_stats(),
+        }
+    except Exception as e:
+        logger.error(f"Error getting Russia customs stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ============================================================================
 # KBChaChaCha API Endpoints
 # ============================================================================
 

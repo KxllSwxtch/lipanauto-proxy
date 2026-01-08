@@ -11,7 +11,7 @@ import random
 import hashlib
 import hmac
 from typing import Dict, Any, Optional, List
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -39,6 +39,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.request_cache import RequestCache
 
 logger = logging.getLogger(__name__)
+
+# Pre-captured signatures from working requests (from Che168/cars.py and brands.py)
+# These signatures are tied to the deviceid: e51c9bd2-efd9-4aaa-b0bd-4f0fd92d9f84
+ENDPOINT_SIGNATURES = {
+    "/api/v11/search": "1af9c29a34a656070bfa923b31e570eb",
+    "/api/v2/getbrands": "076e72f20409a0e3e911e46c05bfffdf",
+}
+
+# Endpoints that don't require _sign parameter
+NO_SIGN_ENDPOINTS = [
+    "/apic/v2/car/getcarinfo",
+    "/api/v1/car/getparamtypeitems",
+]
 
 
 class Che168Service:
@@ -171,24 +184,34 @@ class Che168Service:
         if self.request_count % 20 == 0:
             await asyncio.sleep(random.uniform(1.0, 3.0))
 
-    def _generate_sign(self, params: Dict[str, Any]) -> str:
+    def _generate_sign(self, params: Dict[str, Any], endpoint_path: str = "") -> str:
         """
         Generate _sign parameter for API authentication
-        Based on the pattern from cars.py example
+        Uses pre-captured signatures for known endpoints from Che168/cars.py and brands.py
+
+        Args:
+            params: Request parameters
+            endpoint_path: API endpoint path (e.g., "/api/v11/search")
+
+        Returns:
+            Signature string for the _sign parameter
         """
+        # Use static signature if available for this endpoint
+        if endpoint_path in ENDPOINT_SIGNATURES:
+            logger.debug(f"Using static signature for endpoint: {endpoint_path}")
+            return ENDPOINT_SIGNATURES[endpoint_path]
+
+        # Fallback to MD5 generation (may not work for unknown endpoints)
         try:
-            # Create a deterministic but seemingly random sign
-            # This is a simplified version - in practice, you'd need to reverse engineer the actual algorithm
             param_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()) if k != "_sign")
             param_string += f"&deviceid={self.device_id}&timestamp={int(time.time())}"
-
-            # Generate MD5 hash as sign (simplified approach)
             sign = hashlib.md5(param_string.encode()).hexdigest()
+            logger.warning(f"Generated MD5 sign for unknown endpoint: {endpoint_path} - may not work")
             return sign
         except Exception as e:
-            logger.warning(f"Failed to generate sign: {str(e)}")
-            # Fallback to example sign from cars.py
-            return "1af9c29a34a656070bfa923b31e570eb"
+            logger.error(f"Failed to generate sign: {str(e)}")
+            # Fallback to search endpoint signature as last resort
+            return ENDPOINT_SIGNATURES.get("/api/v11/search", "")
 
     def _is_retriable_error(self, exception: Exception) -> bool:
         """
@@ -260,6 +283,13 @@ class Che168Service:
         if params is None:
             params = {}
 
+        # Extract endpoint path from URL for signature selection
+        parsed_url = urlparse(url)
+        endpoint_path = parsed_url.path
+
+        # Check if this endpoint requires a signature
+        requires_sign = endpoint_path not in NO_SIGN_ENDPOINTS
+
         # Add required parameters
         params.update({
             "deviceid": self.device_id,
@@ -270,8 +300,10 @@ class Che168Service:
             "v": "11.41.5",
         })
 
-        # Generate signature
-        params["_sign"] = self._generate_sign(params)
+        # Generate signature only for endpoints that require it
+        if requires_sign:
+            params["_sign"] = self._generate_sign(params, endpoint_path)
+            logger.debug(f"Added signature for endpoint: {endpoint_path}")
 
         # Check cache for failed requests first
         cached_response = self.failed_request_cache.get(url, params)
