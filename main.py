@@ -66,15 +66,15 @@ from schemas.bravomotors import (
     BravoMotorsSearchFilters,
     TranslationRequest,
     TranslationResponse,
-    # Che168 schemas
+    # Che168 schemas (search, filters, brands)
     Che168SearchResponse,
-    Che168CarDetailResponse,
     Che168FiltersResponse,
     Che168SearchFilters,
     Che168BrandsResponse,
 )
 from schemas.che168 import (
     # Car detail API schemas
+    Che168CarDetailResponse,  # Use the one from che168 with car/error/meta fields
     Che168CarInfoResponse,
     Che168CarParamsResponse,
     Che168CarAnalysisResponse,
@@ -3155,35 +3155,29 @@ async def get_che168_car_detail(info_id: int):
         result = await che168_service.get_car_detail(info_id)
 
         # Return proper HTTP status codes based on service response
-        if result.returncode == 0 and result.success:
+        if result.success:
             # Success
             return result
-        elif result.returncode == 404:
-            # Car not found - return 404
-            raise HTTPException(
-                status_code=404,
-                detail=f"Car listing {info_id} not found - may be sold or delisted"
-            )
-        elif result.returncode == 503:
-            # Service unavailable (circuit breaker open)
-            raise HTTPException(
-                status_code=503,
-                detail="Che168 service temporarily unavailable - please try again later"
-            )
-        elif result.returncode == 514:
-            # Rate limiting error - now fixed with proxy support
-            raise HTTPException(
-                status_code=429,
-                detail="Too many requests to Che168 - please try again in a moment"
-            )
         else:
-            # Other errors - check if it's a rate limiting message
-            error_msg = result.message or "Unknown error"
-            if "514" in error_msg or "Frequency Capped" in error_msg:
-                # Rate limiting detected in error message
+            # Check error message for specific cases
+            error_msg = result.error or "Unknown error"
+            if "not found" in error_msg.lower() or "404" in error_msg:
+                # Car not found - return 404
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Car listing {info_id} not found - may be sold or delisted"
+                )
+            elif "unavailable" in error_msg.lower() or "circuit" in error_msg.lower():
+                # Service unavailable (circuit breaker open)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Che168 service temporarily unavailable - please try again later"
+                )
+            elif "514" in error_msg or "Frequency Capped" in error_msg:
+                # Rate limiting error
                 raise HTTPException(
                     status_code=429,
-                    detail="Che168 rate limit reached - retrying with proxy. Please refresh the page."
+                    detail="Too many requests to Che168 - please try again in a moment"
                 )
             else:
                 # Other errors - return 500

@@ -1,21 +1,21 @@
 """
-Che168 Service
-Business logic layer for Chinese car marketplace integration
+Che168 Service - BravoMotors Proxy Implementation
+Business logic layer for Chinese car marketplace integration via bravomotorrs.com proxy
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
 import random
-import hashlib
-import hmac
 from typing import Dict, Any, Optional, List
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, quote
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from requests.exceptions import RequestException, Timeout, ConnectionError
+from diskcache import Cache
 
 from parsers.bravomotors_parser import Che168Parser
 from schemas.bravomotors import (
@@ -29,48 +29,45 @@ from schemas.che168 import (
     Che168CarInfoResponse,
     Che168CarParamsResponse,
     Che168CarAnalysisResponse,
-    Che168CarDetailResponse,  # Use correct schema from che168
+    Che168CarDetailResponse,
 )
-
-# Import request cache utility
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from lib.request_cache import RequestCache
 
 logger = logging.getLogger(__name__)
 
-# Pre-captured signatures from working requests (from Che168/cars.py and brands.py)
-# These signatures are tied to the deviceid: e51c9bd2-efd9-4aaa-b0bd-4f0fd92d9f84
-ENDPOINT_SIGNATURES = {
-    "/api/v11/search": "1af9c29a34a656070bfa923b31e570eb",
-    "/api/v2/getbrands": "076e72f20409a0e3e911e46c05bfffdf",
-}
+# BravoMotors Proxy Configuration
+BRAVOMOTORS_PROXY_URL = "https://bravomotorrs.com/api/che168/data"
 
-# Endpoints that don't require _sign parameter
-NO_SIGN_ENDPOINTS = [
-    "/apic/v2/car/getcarinfo",
-    "/api/v1/car/getparamtypeitems",
-]
+# Che168 API Base URLs (used to construct proxy URLs)
+CHE168_SEARCH_API = "https://api2scsou.che168.com"
+CHE168_DETAIL_API = "https://apiuscdt.che168.com"
+
+# Cache TTLs (in seconds)
+CACHE_TTL_BRANDS = 3600      # 1 hour
+CACHE_TTL_MODELS = 1800      # 30 minutes
+CACHE_TTL_YEARS = 1800       # 30 minutes
+CACHE_TTL_SEARCH = 300       # 5 minutes
+CACHE_TTL_CAR_DETAIL = 600   # 10 minutes
 
 
 class Che168Service:
     """
-    Che168 service for Chinese car marketplace integration
+    Che168 service for Chinese car marketplace integration via BravoMotors proxy
+
+    Routes all requests through bravomotorrs.com/api/che168/data which handles:
+    - Request forwarding to che168.com
+    - Authentication and session management
+    - Rate limiting and anti-bot measures
 
     Provides comprehensive functionality for:
     - Car search with filters and pagination
     - Individual car detail retrieval
-    - Service filter options
-    - Session management with Chinese site requirements
-    - Request signing for API authentication
+    - Brand/model/year cascading filters
+    - Disk-based caching for performance
     """
 
     def __init__(self, proxy_client=None):
-        self.proxy_client = proxy_client
+        self.proxy_client = proxy_client  # Not used with BravoMotors proxy
         self.parser = Che168Parser()
-        self.base_url = "https://api2scsou.che168.com"
-        self.mobile_url = "https://m.che168.com"
 
         # Session management
         self.session = requests.Session()
@@ -79,72 +76,37 @@ class Che168Service:
         self.last_request_time = 0
         self.request_count = 0
 
-        # Cache for session persistence
-        self.session_cookies = {}
-        self.device_id = "e51c9bd2-efd9-4aaa-b0bd-4f0fd92d9f84"
-
-        # Failed request cache (5 minute TTL for 404s)
-        self.failed_request_cache = RequestCache(max_size=500, default_ttl=300)
+        # Disk-based cache
+        self.cache = Cache('/tmp/che168_cache')
 
         # Circuit breaker state
         self.circuit_breaker_failures = 0
         self.circuit_breaker_last_reset = time.time()
         self.circuit_breaker_cooldown_until = 0
 
-        # Setup session after device_id is defined
+        # Setup session
         self._setup_session()
 
     def _setup_session(self):
-        """Setup session with Chinese site requirements"""
-        # Chinese site specific headers (from cars.py example)
-        self.session.headers.update(
-            {
-                "accept": "*/*",
-                "accept-language": "en,ru;q=0.9,en-CA;q=0.8,la;q=0.7,fr;q=0.6,ko;q=0.5",
-                "origin": "https://m.che168.com",
-                "priority": "u=1, i",
-                "referer": "https://m.che168.com/",
-                "sec-ch-ua": '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
-                "sec-ch-ua-mobile": "?0",
-                "sec-ch-ua-platform": '"macOS"',
-                "sec-fetch-dest": "empty",
-                "sec-fetch-mode": "cors",
-                "sec-fetch-site": "same-site",
-                "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-            }
-        )
-
-        # Set up cookies from cars.py example
-        cookies = {
-            "fvlid": "175765024666870S5QR2lY0E5",
-            "sessionid": self.device_id,
-            "sessionip": "1.228.56.78",
-            "area": "0",
-            "che_sessionid": "65845ADD-8F0D-498F-A254-8B7B4EC47F01%7C%7C2025-09-12+12%3A10%3A47.942%7C%7Cwww.google.com",
-            "Hm_lvt_d381ec2f88158113b9b76f14c497ed48": "1757650247,1757841415",
-            "HMACCOUNT": "7D5AA048D6828FA7",
-            "userarea": "0",
-            "listuserarea": "0",
-            "sessionvisit": "0e9b80a5-c2ff-4ba7-baf8-79a0256f24ee",
-            "sessionvisitInfo": f"{self.device_id}||0",
-            "che_sessionvid": "140239D5-014C-434E-ABFF-82B91E2B6D77",
-            "Hm_lpvt_d381ec2f88158113b9b76f14c497ed48": str(int(time.time())),
-            "showNum": "17",
-            "_ac": "TDjKkEvclbcQ7E0PG_UvuH0jdR8JW5ShH2qwXbTIr4OJITU9lHrR",
-            "KEY_LOCATION_CITY_GEO_DATE": "2025915",
-            "ahpvno": "7",
-            "ahuuid": "1F965AC4-0F18-4209-BD3F-2D89C5E74F0C",
-            "v_no": "16",
-            "visit_info_ad": "65845ADD-8F0D-498F-A254-8B7B4EC47F01||140239D5-014C-434E-ABFF-82B91E2B6D77||-1||-1||16",
-            "che_ref": "www.google.com%7C0%7C0%7C0%7C2025-09-15+07%3A27%3A45.576%7C2025-09-12+12%3A10%3A47.942",
-            "sessionuid": self.device_id,
-        }
-
-        self.session.cookies.update(cookies)
+        """Setup session with BravoMotors proxy requirements"""
+        # Headers matching the user's cURL example
+        self.session.headers.update({
+            'accept': 'application/json',
+            'accept-language': 'en,ru;q=0.9,en-CA;q=0.8,la;q=0.7,fr;q=0.6,ko;q=0.5',
+            'content-type': 'application/json',
+            'priority': 'u=1, i',
+            'referer': 'https://bravomotorrs.com/catalog/cn',
+            'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"macOS"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+        })
 
         # Session configuration
         self.session.timeout = (10, 30)  # connect, read timeout
-        self.session.max_redirects = 3
 
         # Connection pooling with retry strategy
         retry_strategy = Retry(
@@ -161,85 +123,54 @@ class Che168Service:
             pool_block=False
         )
 
-        # Mount adapter for both HTTP and HTTPS
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
 
-        # Cache for brands/models/years to reduce API calls
-        self.brands_cache = None
-        self.brands_cache_time = 0
-        self.models_cache = {}
-        self.years_cache = {}
+    def _build_proxy_url(self, original_url: str, params: Dict[str, Any] = None) -> str:
+        """
+        Build bravomotorrs.com proxy URL
+
+        Args:
+            original_url: The original che168 API URL (base only, without params)
+            params: Query parameters to append
+
+        Returns:
+            Proxy URL with encoded che168 URL as parameter
+        """
+        # Build the full che168 URL with params
+        if params:
+            param_string = urlencode(params, safe='')
+            full_url = f"{original_url}?{param_string}"
+        else:
+            full_url = original_url
+
+        # URL encode the full che168 URL and wrap with proxy
+        encoded_url = quote(full_url, safe='')
+        return f"{BRAVOMOTORS_PROXY_URL}?url={encoded_url}"
+
+    def _get_cache_key(self, prefix: str, params: Dict[str, Any] = None) -> str:
+        """Generate a cache key from prefix and parameters"""
+        if params:
+            # Create deterministic hash of params
+            param_str = json.dumps(params, sort_keys=True)
+            param_hash = hashlib.md5(param_str.encode()).hexdigest()[:12]
+            return f"che168:{prefix}:{param_hash}"
+        return f"che168:{prefix}"
 
     async def _rate_limit(self):
-        """Rate limiting to avoid being blocked (async-compatible)"""
+        """Rate limiting for BravoMotors proxy (200ms between requests)"""
         current_time = time.time()
-        if current_time - self.last_request_time < 0.5:  # 500ms between requests
-            await asyncio.sleep(0.5 - (current_time - self.last_request_time))
+        min_interval = 0.2  # 200ms between requests
+
+        if current_time - self.last_request_time < min_interval:
+            await asyncio.sleep(min_interval - (current_time - self.last_request_time))
 
         self.last_request_time = time.time()
         self.request_count += 1
 
-        # Add random delay occasionally
+        # Add random delay occasionally to appear more human-like
         if self.request_count % 20 == 0:
-            await asyncio.sleep(random.uniform(1.0, 3.0))
-
-    def _generate_sign(self, params: Dict[str, Any], endpoint_path: str = "") -> str:
-        """
-        Generate _sign parameter for API authentication
-        Uses pre-captured signatures for known endpoints from Che168/cars.py and brands.py
-
-        Args:
-            params: Request parameters
-            endpoint_path: API endpoint path (e.g., "/api/v11/search")
-
-        Returns:
-            Signature string for the _sign parameter
-        """
-        # Use static signature if available for this endpoint
-        if endpoint_path in ENDPOINT_SIGNATURES:
-            logger.debug(f"Using static signature for endpoint: {endpoint_path}")
-            return ENDPOINT_SIGNATURES[endpoint_path]
-
-        # Fallback to MD5 generation (may not work for unknown endpoints)
-        try:
-            param_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()) if k != "_sign")
-            param_string += f"&deviceid={self.device_id}&timestamp={int(time.time())}"
-            sign = hashlib.md5(param_string.encode()).hexdigest()
-            logger.warning(f"Generated MD5 sign for unknown endpoint: {endpoint_path} - may not work")
-            return sign
-        except Exception as e:
-            logger.error(f"Failed to generate sign: {str(e)}")
-            # Fallback to search endpoint signature as last resort
-            return ENDPOINT_SIGNATURES.get("/api/v11/search", "")
-
-    def _is_retriable_error(self, exception: Exception) -> bool:
-        """
-        Determine if an error should be retried
-
-        Retriable errors:
-        - 5xx server errors (temporary server issues)
-        - Network timeouts
-        - Connection errors
-
-        Non-retriable errors:
-        - 404 Not Found (resource doesn't exist)
-        - 400 Bad Request (invalid parameters)
-        - 401/403 Authentication/Authorization errors
-        """
-        if isinstance(exception, Timeout):
-            return True
-
-        if isinstance(exception, ConnectionError):
-            return True
-
-        if isinstance(exception, RequestException):
-            if hasattr(exception, 'response') and exception.response is not None:
-                status_code = exception.response.status_code
-                # Only retry 5xx errors
-                return 500 <= status_code < 600
-
-        return False
+            await asyncio.sleep(random.uniform(0.5, 1.5))
 
     def _check_circuit_breaker(self) -> bool:
         """
@@ -264,16 +195,20 @@ class Che168Service:
         return True
 
     async def _make_request(
-        self, url: str, params: Dict = None, use_proxy: bool = False, max_retries: int = 1
+        self,
+        base_url: str,
+        endpoint_path: str,
+        params: Dict = None,
+        max_retries: int = 2
     ) -> Dict[str, Any]:
         """
-        Make HTTP request with intelligent error handling and retry logic
+        Make HTTP request through BravoMotors proxy
 
         Args:
-            url: Target URL
+            base_url: Che168 API base URL (e.g., CHE168_SEARCH_API or CHE168_DETAIL_API)
+            endpoint_path: API endpoint path (e.g., "/api/v11/search")
             params: Query parameters
-            use_proxy: Whether to use proxy client
-            max_retries: Maximum retry attempts (default: 1, only for retriable errors)
+            max_retries: Maximum retry attempts
 
         Returns:
             JSON response data
@@ -283,32 +218,11 @@ class Che168Service:
         if params is None:
             params = {}
 
-        # Extract endpoint path from URL for signature selection
-        parsed_url = urlparse(url)
-        endpoint_path = parsed_url.path
+        # Build the original che168 URL
+        original_url = f"{base_url}{endpoint_path}"
 
-        # Check if this endpoint requires a signature
-        requires_sign = endpoint_path not in NO_SIGN_ENDPOINTS
-
-        # Add required parameters
-        params.update({
-            "deviceid": self.device_id,
-            "userid": "0",
-            "s_pid": "0",
-            "s_cid": "0",
-            "_appid": "2sc.m",
-            "v": "11.41.5",
-        })
-
-        # Generate signature only for endpoints that require it
-        if requires_sign:
-            params["_sign"] = self._generate_sign(params, endpoint_path)
-            logger.debug(f"Added signature for endpoint: {endpoint_path}")
-
-        # Check cache for failed requests first
-        cached_response = self.failed_request_cache.get(url, params)
-        if cached_response is not None:
-            return cached_response
+        # Build proxy URL
+        proxy_url = self._build_proxy_url(original_url, params)
 
         # Check circuit breaker
         if not self._check_circuit_breaker():
@@ -323,13 +237,8 @@ class Che168Service:
 
         for attempt in range(max_retries + 1):
             try:
-                if use_proxy and self.proxy_client:
-                    # Use proxy client if available
-                    response = self.proxy_client.session.get(url, params=params)
-                else:
-                    # Use regular session
-                    response = self.session.get(url, params=params)
-
+                logger.debug(f"Making proxy request (attempt {attempt + 1}): {endpoint_path}")
+                response = self.session.get(proxy_url, timeout=(10, 30))
                 response.raise_for_status()
 
                 # Parse JSON response
@@ -338,7 +247,7 @@ class Che168Service:
                 # Log slow requests
                 request_time = time.time() - request_start_time
                 if request_time > 5.0:
-                    logger.warning(f"Slow request detected: {url} took {request_time:.2f}s")
+                    logger.warning(f"Slow request detected: {endpoint_path} took {request_time:.2f}s")
 
                 # Reset circuit breaker on success
                 self.circuit_breaker_failures = 0
@@ -349,55 +258,26 @@ class Che168Service:
                 last_exception = e
                 status_code = getattr(e.response, 'status_code', None) if hasattr(e, 'response') and e.response else None
 
-                # Log appropriately based on error type
-                if status_code == 404:
-                    logger.info(f"Resource not found (404): {url} - infoid may be invalid or car delisted")
-                elif status_code and 400 <= status_code < 500:
-                    logger.warning(f"Client error ({status_code}): {url} - {str(e)}")
-                else:
-                    logger.warning(f"Request attempt {attempt + 1}/{max_retries + 1} failed: {str(e)}")
+                logger.warning(f"Request attempt {attempt + 1}/{max_retries + 1} failed: {str(e)}")
 
-                # Check if error is retriable
-                is_retriable = self._is_retriable_error(e)
+                # Update circuit breaker
+                self.circuit_breaker_failures += 1
+                if self.circuit_breaker_failures >= 10:
+                    self.circuit_breaker_cooldown_until = time.time() + 10
+                    logger.error(f"Circuit breaker OPENED - too many failures ({self.circuit_breaker_failures})")
 
-                # Cache non-retriable errors (404, 400, etc.) to prevent redundant requests
-                if not is_retriable and status_code:
-                    error_response = {
-                        "returncode": status_code,
-                        "message": f"Request failed with {status_code}: {str(e)}",
-                        "result": {},
-                    }
-                    # Cache 404s for 5 minutes, other client errors for 1 minute
-                    ttl = 300 if status_code == 404 else 60
-                    self.failed_request_cache.set(url, error_response, params, ttl=ttl)
-
-                    # Update circuit breaker
-                    self.circuit_breaker_failures += 1
-                    if self.circuit_breaker_failures >= 10:  # 10 failures in 1 minute
-                        self.circuit_breaker_cooldown_until = time.time() + 10
-                        logger.error(f"Circuit breaker OPENED - too many failures ({self.circuit_breaker_failures})")
-
-                    return error_response
-
-                # Only retry if error is retriable and we have retries left
-                if is_retriable and attempt < max_retries:
-                    # Exponential backoff with async sleep (non-blocking)
+                # Retry with exponential backoff
+                if attempt < max_retries:
                     backoff_time = (2 ** attempt) * 0.5 + random.uniform(0, 0.5)
-                    logger.info(f"Retriable error, retrying in {backoff_time:.1f}s...")
+                    logger.info(f"Retrying in {backoff_time:.1f}s...")
                     await asyncio.sleep(backoff_time)
                     continue
-                else:
-                    # No more retries or non-retriable error
-                    self.circuit_breaker_failures += 1
-                    if self.circuit_breaker_failures >= 10:
-                        self.circuit_breaker_cooldown_until = time.time() + 10
-                        logger.error(f"Circuit breaker OPENED - too many failures ({self.circuit_breaker_failures})")
 
-                    return {
-                        "returncode": status_code or 1,
-                        "message": f"Request failed: {str(e)}",
-                        "result": {},
-                    }
+                return {
+                    "returncode": status_code or 1,
+                    "message": f"Request failed: {str(e)}",
+                    "result": {},
+                }
 
             except Exception as e:
                 logger.error(f"Unexpected error in request: {str(e)}")
@@ -407,7 +287,6 @@ class Che168Service:
                     "result": {},
                 }
 
-        # Should not reach here, but handle it gracefully
         return {
             "returncode": 1,
             "message": f"Request failed after {max_retries + 1} attempts: {str(last_exception)}",
@@ -425,32 +304,17 @@ class Che168Service:
             Che168SearchResponse with search results
         """
         try:
-            url = f"{self.base_url}/api/v11/search"
-
-            # Convert filters to API parameters
+            # Build search parameters
             params = {
+                "_appid": "2sc.m",
                 "pageindex": str(filters.pageindex),
                 "pagesize": str(filters.pagesize),
-                "ishideback": str(filters.ishideback),
-                "service": str(filters.service) if filters.service else "50",
-                "srecom": str(filters.srecom),
-                "personalizedpush": str(filters.personalizedpush),
-                "cid": str(filters.cid),
-                "iscxcshowed": str(filters.iscxcshowed),
-                "scene_no": str(filters.scene_no),
-                "pageid": f"{int(time.time())}_4145",
-                "existtags": getattr(filters, 'existtags', ''),
-                "pid": str(filters.pid),
-                "testtype": getattr(filters, 'testtype', ''),
-                "test102223": getattr(filters, 'test102223', ''),
-                "testnewcarspecid": getattr(filters, 'testnewcarspecid', ''),
-                "test102797": getattr(filters, 'test102797', ''),
-                "otherstatisticsext": "%7B%22history%22%3A%22%E5%88%97%E8%A1%A8%E9%A1%B5%22%2C%22pvareaid%22%3A%220%22%2C%22eventid%22%3A%22usc_2sc_mc_mclby_cydj_click%22%7D",
-                "filtertype": str(filters.filtertype),
-                "ssnew": str(filters.ssnew),
+                "pvareaid": "111478",
+                "scene_no": "12",
+                "sort": str(filters.sort) if filters.sort else "0",
             }
 
-            # Add brand/model/year filters if provided
+            # Add optional filters
             if filters.brandid:
                 params["brandid"] = str(filters.brandid)
             if filters.seriesid:
@@ -459,11 +323,38 @@ class Che168Service:
                 params["seriesyearid"] = str(filters.seriesyearid)
             if filters.specid:
                 params["specid"] = str(filters.specid)
-            if filters.sort:
-                params["sort"] = str(filters.sort)
+            if filters.service:
+                params["service"] = str(filters.service)
+            if filters.price:
+                params["price"] = str(filters.price)
+            if filters.agerange:
+                params["agerange"] = str(filters.agerange)
+            if filters.mileage:
+                params["mileage"] = str(filters.mileage)
+            if filters.fueltype:
+                params["fueltype"] = str(filters.fueltype)
+            if filters.displacement:
+                params["displacement"] = str(filters.displacement)
 
-            json_data = await self._make_request(url, params)
+            # Check cache first (only for non-page-1 requests to ensure fresh data on initial load)
+            cache_key = self._get_cache_key("search", params)
+            if filters.pageindex > 1:
+                cached = self.cache.get(cache_key)
+                if cached:
+                    logger.debug(f"Cache hit for search: {cache_key}")
+                    return cached
+
+            # Make request
+            json_data = await self._make_request(
+                CHE168_SEARCH_API,
+                "/api/v11/search",
+                params
+            )
             result = self.parser.parse_car_search_response(json_data)
+
+            # Cache successful results
+            if result.success:
+                self.cache.set(cache_key, result, expire=CACHE_TTL_SEARCH)
 
             return result
 
@@ -476,15 +367,207 @@ class Che168Service:
                 success=False
             )
 
+    async def get_brands(self) -> Che168BrandsResponse:
+        """
+        Get all available car brands from Che168
+
+        Returns:
+            Che168BrandsResponse with all available brands
+        """
+        try:
+            # Check cache first
+            cache_key = self._get_cache_key("brands")
+            cached = self.cache.get(cache_key)
+            if cached:
+                logger.debug("Cache hit for brands")
+                return cached
+
+            params = {
+                "_appid": "2sc.m",
+                "cid": "0",
+                "pid": "0",
+                "isenergy": "0",
+                "s_pid": "0",
+                "s_cid": "0",
+            }
+
+            json_data = await self._make_request(
+                CHE168_SEARCH_API,
+                "/api/v2/getbrands",
+                params
+            )
+            result = self.parser.parse_brands_response(json_data)
+
+            # Cache successful results
+            if result.returncode == 0:
+                self.cache.set(cache_key, result, expire=CACHE_TTL_BRANDS)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in get_brands: {str(e)}")
+            return Che168BrandsResponse(
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result={}
+            )
+
+    async def get_models(self, brand_id: int) -> Che168SearchResponse:
+        """
+        Get available models for a specific brand
+
+        Args:
+            brand_id: Brand ID to get models for
+
+        Returns:
+            Che168SearchResponse with search results containing model filters
+        """
+        try:
+            # Check cache first
+            cache_key = self._get_cache_key("models", {"brand_id": brand_id})
+            cached = self.cache.get(cache_key)
+            if cached:
+                logger.debug(f"Cache hit for models: brand_id={brand_id}")
+                return cached
+
+            params = {
+                "_appid": "2sc.m",
+                "pageindex": "1",
+                "pagesize": "1",
+                "brandid": str(brand_id),
+                "pvareaid": "111478",
+                "scene_no": "12",
+            }
+
+            raw_response = await self._make_request(
+                CHE168_SEARCH_API,
+                "/api/v11/search",
+                params
+            )
+
+            if raw_response.get("returncode") != 0:
+                return Che168SearchResponse(
+                    returncode=raw_response.get("returncode", -1),
+                    message=raw_response.get('message', 'Unknown error'),
+                    result={},
+                    success=False
+                )
+
+            result = self.parser.parse_car_search_response(raw_response)
+
+            # Extract models from filters array
+            models = []
+            if result.filters:
+                for filter_item in result.filters:
+                    if filter_item.key == "seriesid":
+                        models.append({
+                            "id": int(filter_item.value),
+                            "name": filter_item.title,
+                            "value": filter_item.value,
+                            "title": filter_item.title,
+                        })
+
+            # Add models to result
+            if hasattr(result, 'result') and isinstance(result.result, dict):
+                result.result['models'] = models
+                result.result['series'] = models
+
+            # Cache successful results
+            if result.success:
+                self.cache.set(cache_key, result, expire=CACHE_TTL_MODELS)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in get_models for brand {brand_id}: {str(e)}")
+            return Che168SearchResponse(
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result={},
+                success=False
+            )
+
+    async def get_years(self, brand_id: int, series_id: int) -> Che168SearchResponse:
+        """
+        Get available years for a specific brand and model
+
+        Args:
+            brand_id: Brand ID
+            series_id: Series (model) ID
+
+        Returns:
+            Che168SearchResponse with search results containing year filters
+        """
+        try:
+            # Check cache first
+            cache_key = self._get_cache_key("years", {"brand_id": brand_id, "series_id": series_id})
+            cached = self.cache.get(cache_key)
+            if cached:
+                logger.debug(f"Cache hit for years: brand_id={brand_id}, series_id={series_id}")
+                return cached
+
+            params = {
+                "_appid": "2sc.m",
+                "pageindex": "1",
+                "pagesize": "1",
+                "brandid": str(brand_id),
+                "seriesid": str(series_id),
+                "pvareaid": "111478",
+                "scene_no": "12",
+            }
+
+            raw_response = await self._make_request(
+                CHE168_SEARCH_API,
+                "/api/v11/search",
+                params
+            )
+
+            if raw_response.get("returncode") != 0:
+                return Che168SearchResponse(
+                    returncode=raw_response.get("returncode", -1),
+                    message=raw_response.get('message', 'Unknown error'),
+                    result={},
+                    success=False
+                )
+
+            result = self.parser.parse_car_search_response(raw_response)
+
+            # Extract years from filters array
+            years = []
+            if result.filters:
+                for filter_item in result.filters:
+                    if filter_item.key == "seriesyearid":
+                        years.append({
+                            "id": int(filter_item.value),
+                            "name": filter_item.title,
+                            "value": filter_item.value,
+                            "title": filter_item.title,
+                        })
+
+            # Add years to result
+            if hasattr(result, 'result') and isinstance(result.result, dict):
+                result.result['years'] = years
+
+            # Cache successful results
+            if result.success:
+                self.cache.set(cache_key, result, expire=CACHE_TTL_YEARS)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in get_years for brand {brand_id}, series {series_id}: {str(e)}")
+            return Che168SearchResponse(
+                returncode=-1,
+                message=f"Service error: {str(e)}",
+                result={},
+                success=False
+            )
+
     async def get_car_detail(self, info_id: int) -> Che168CarDetailResponse:
         """
         Get detailed information for a specific car
 
-        This method now uses the working endpoints:
-        - /car/getcarinfo for basic information
-        - /car/getparamtypeitems for detailed parameters
-
-        These are fetched in parallel for better performance.
+        Fetches both car info and params in parallel for better performance.
 
         Args:
             info_id: Car listing ID
@@ -493,18 +576,24 @@ class Che168Service:
             Che168CarDetailResponse with car details
         """
         try:
-            # Fetch car info and params in parallel using the working endpoints
+            # Check cache first
+            cache_key = self._get_cache_key("car_detail", {"info_id": info_id})
+            cached = self.cache.get(cache_key)
+            if cached:
+                logger.debug(f"Cache hit for car detail: info_id={info_id}")
+                return cached
+
+            # Fetch car info and params in parallel
             car_info_task = self.get_car_info(info_id)
             car_params_task = self.get_car_params(info_id)
 
-            # Wait for both requests to complete
             car_info_response, car_params_response = await asyncio.gather(
                 car_info_task,
                 car_params_task,
                 return_exceptions=True
             )
 
-            # Check if requests failed
+            # Handle exceptions
             if isinstance(car_info_response, Exception):
                 logger.error(f"Error fetching car info for {info_id}: {str(car_info_response)}")
                 return Che168CarDetailResponse(
@@ -515,7 +604,6 @@ class Che168Service:
 
             if isinstance(car_params_response, Exception):
                 logger.error(f"Error fetching car params for {info_id}: {str(car_params_response)}")
-                # We can still return partial data if we have car info
                 car_params_response = Che168CarParamsResponse(
                     returncode=0,
                     message="Params not available",
@@ -530,7 +618,7 @@ class Che168Service:
                     error=car_info_response.message or "Car info not found"
                 )
 
-            # Build a car object from car_info data (matching frontend Che168Car interface)
+            # Build car object from car_info data
             if car_info_response.result:
                 info_data = car_info_response.result
 
@@ -538,7 +626,6 @@ class Che168Service:
                 pic_list = info_data.get('picList', [])
                 image_url = pic_list[0] if pic_list else ""
 
-                # Create a car object that matches the frontend Che168Car interface
                 car_object = {
                     "infoid": info_data.get('infoid', 0),
                     "carname": info_data.get('carname', ''),
@@ -579,19 +666,27 @@ class Che168Service:
                     "isnewly": info_data.get('isnewly', 0),
                     "kindname": info_data.get('kindname', ''),
                     "photocount": info_data.get('photocount', 0),
+                    "remark": info_data.get('remark', ''),
+                    "guidanceprice": info_data.get('guidanceprice', 0),
+                    "engine": info_data.get('engine', ''),
+                    "vincode": info_data.get('vincode', ''),
                 }
 
-                # Add parameter sections as a separate field for UI rendering
+                # Add parameter sections
                 param_sections = []
                 if car_params_response.returncode == 0 and car_params_response.result:
                     param_sections = car_params_response.result
 
-                # Return response with car object (matching frontend expectations)
-                return Che168CarDetailResponse(
+                result = Che168CarDetailResponse(
                     success=True,
                     car=car_object,
                     meta={"params": param_sections}
                 )
+
+                # Cache successful results
+                self.cache.set(cache_key, result, expire=CACHE_TTL_CAR_DETAIL)
+
+                return result
             else:
                 return Che168CarDetailResponse(
                     success=False,
@@ -607,345 +702,6 @@ class Che168Service:
                 error=f"Service error: {str(e)}"
             )
 
-    async def get_filters(self) -> Che168FiltersResponse:
-        """
-        Get available filter options
-
-        Returns:
-            Che168FiltersResponse with available filters
-        """
-        try:
-            # Get brands first
-            brands_result = await self.get_brands()
-
-            if not brands_result.returncode == 0:
-                return Che168FiltersResponse(
-                    success=False,
-                    brands=[],
-                    price_ranges=[],
-                    age_ranges=[],
-                    mileage_ranges=[],
-                    fuel_types=[],
-                    transmissions=[],
-                    displacements=[]
-                )
-
-            # Create structured filters response using parser
-            all_brands = []
-            for brand_group in brands_result.result.values():
-                if isinstance(brand_group, list):
-                    all_brands.extend(brand_group)
-
-            result = self.parser.create_filters_response(all_brands)
-            return result
-
-        except Exception as e:
-            logger.error(f"Error in get_filters: {str(e)}")
-            return Che168FiltersResponse(
-                success=False,
-                brands=[],
-                price_ranges=[],
-                age_ranges=[],
-                mileage_ranges=[],
-                fuel_types=[],
-                transmissions=[],
-                displacements=[]
-            )
-
-    def update_cookies(self, new_cookies: Dict[str, str]):
-        """Update session cookies"""
-        self.session.cookies.update(new_cookies)
-        self.session_cookies.update(new_cookies)
-
-    async def get_brands(self) -> Che168BrandsResponse:
-        """
-        Get all available car brands from Che168
-
-        Returns:
-            Che168BrandsResponse with all available brands
-        """
-        try:
-            # Check cache first (cache for 1 hour)
-            current_time = time.time()
-            if self.brands_cache and (current_time - self.brands_cache_time) < 3600:
-                return self.brands_cache
-
-            url = f"{self.base_url}/api/v2/getbrands"
-
-            # Use minimal parameters similar to brands.py example
-            params = {
-                "cid": "0",
-                "pid": "0",
-                "isenergy": "0",
-                "s_pid": "0",
-                "s_cid": "0",
-            }
-
-            json_data = await self._make_request(url, params)
-            result = self.parser.parse_brands_response(json_data)
-
-            # Cache the result
-            if result.returncode == 0:
-                self.brands_cache = result
-                self.brands_cache_time = current_time
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error in get_brands: {str(e)}")
-            return Che168BrandsResponse(
-                returncode=-1,
-                message=f"Service error: {str(e)}",
-                result={}
-            )
-
-    async def get_models(self, brand_id: int) -> Che168SearchResponse:
-        """
-        Get available models for a specific brand
-
-        Args:
-            brand_id: Brand ID to get models for
-
-        Returns:
-            Che168SearchResponse with search results containing model filters
-        """
-        try:
-            # Check cache first
-            cache_key = f"brand_{brand_id}"
-            if cache_key in self.models_cache:
-                cached_result, cache_time = self.models_cache[cache_key]
-                if (time.time() - cache_time) < 1800:  # 30 minutes cache
-                    return cached_result
-
-            # Make search request with brand ID to get models from filters
-            url = f"{self.base_url}/api/v11/search"
-            params = {
-                "pageindex": "1",
-                "pagesize": "1",
-                "ishideback": "1",
-                "brandid": str(brand_id),
-                "srecom": "2",
-                "personalizedpush": "1",
-                "cid": "0",
-                "iscxcshowed": "-1",
-                "scene_no": "12",
-                "pageid": f"{int(time.time())}_4145",
-                "existtags": "6",
-                "pid": "0",
-                "testtype": "X",
-                "test102223": "X",
-                "testnewcarspecid": "X",
-                "test102797": "X",
-                "otherstatisticsext": "%7B%22history%22%3A%22%E5%88%97%E8%A1%A8%E9%A1%B5%22%2C%22pvareaid%22%3A%220%22%2C%22eventid%22%3A%22usc_2sc_mc_mclby_cydj_click%22%7D",
-                "filtertype": "0",
-                "ssnew": "1",
-            }
-
-            # Get raw response to extract models from filters
-            raw_response = await self._make_request(url, params)
-
-            if raw_response.get("returncode") != 0:
-                return Che168SearchResponse(
-                    returncode=raw_response.get("returncode", -1),
-                    message=raw_response.get('message', 'Unknown error'),
-                    result={},
-                    success=False
-                )
-
-            # Parse the response with models in filters
-            result = self.parser.parse_car_search_response(raw_response)
-
-            # Extract models from filters array for easier frontend consumption
-            models = []
-            if result.filters:
-                for filter_item in result.filters:
-                    # Look for series/model filters (key = "seriesid")
-                    if filter_item.key == "seriesid":
-                        models.append({
-                            "id": int(filter_item.value),
-                            "name": filter_item.title,
-                            "icon": getattr(filter_item, 'icon', ''),
-                            "tag": getattr(filter_item, 'tag', ''),
-                            "value": filter_item.value,
-                            "title": filter_item.title,
-                            "subtitle": getattr(filter_item, 'subtitle', ''),
-                        })
-
-            # Add models array to result for frontend compatibility
-            if hasattr(result, 'result') and isinstance(result.result, dict):
-                result.result['models'] = models
-                result.result['series'] = models  # Also add as series for backward compatibility
-
-            # Cache the result
-            self.models_cache[cache_key] = (result, time.time())
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error in get_models for brand {brand_id}: {str(e)}")
-            return Che168SearchResponse(
-                returncode=-1,
-                message=f"Service error: {str(e)}",
-                result={},
-                success=False
-            )
-
-    async def get_years(self, brand_id: int, series_id: int) -> Che168SearchResponse:
-        """
-        Get available years for a specific brand and model
-
-        Args:
-            brand_id: Brand ID
-            series_id: Series (model) ID
-
-        Returns:
-            Che168SearchResponse with search results containing year filters
-        """
-        try:
-            # Check cache first
-            cache_key = f"brand_{brand_id}_series_{series_id}"
-            if cache_key in self.years_cache:
-                cached_result, cache_time = self.years_cache[cache_key]
-                if (time.time() - cache_time) < 1800:  # 30 minutes cache
-                    return cached_result
-
-            # Make search request with brand and series ID to get years from filters
-            url = f"{self.base_url}/api/v11/search"
-            params = {
-                "pageindex": "1",
-                "pagesize": "1",
-                "ishideback": "1",
-                "brandid": str(brand_id),
-                "seriesid": str(series_id),
-                "srecom": "2",
-                "personalizedpush": "1",
-                "cid": "0",
-                "iscxcshowed": "-1",
-                "scene_no": "12",
-                "pageid": f"{int(time.time())}_4375",
-                "existtags": "6",
-                "pid": "0",
-                "testtype": "X",
-                "test102223": "X",
-                "testnewcarspecid": "X",
-                "test102797": "X",
-                "otherstatisticsext": "%7B%22history%22%3A%22%E5%88%97%E8%A1%A8%E9%A1%B5%22%2C%22pvareaid%22%3A%220%22%2C%22eventid%22%3A%22usc_2sc_mc_mclby_cydj_click%22%7D",
-                "filtertype": "0",
-                "ssnew": "1",
-            }
-
-            # Get raw response to extract years from filters
-            raw_response = await self._make_request(url, params)
-
-            if raw_response.get("returncode") != 0:
-                return Che168SearchResponse(
-                    returncode=raw_response.get("returncode", -1),
-                    message=raw_response.get('message', 'Unknown error'),
-                    result={},
-                    success=False
-                )
-
-            # Parse the response with years in filters
-            result = self.parser.parse_car_search_response(raw_response)
-
-            # Extract years from filters array for easier frontend consumption
-            years = []
-            if result.filters:
-                for filter_item in result.filters:
-                    # Look for year filters (key = "seriesyearid")
-                    if filter_item.key == "seriesyearid":
-                        years.append({
-                            "id": int(filter_item.value),
-                            "name": filter_item.title,
-                            "value": filter_item.value,
-                            "title": filter_item.title,
-                            "subtitle": getattr(filter_item, 'subtitle', ''),
-                        })
-
-            # Add years array to result for frontend compatibility
-            if hasattr(result, 'result') and isinstance(result.result, dict):
-                result.result['years'] = years
-
-            # Cache the result
-            self.years_cache[cache_key] = (result, time.time())
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Error in get_years for brand {brand_id}, series {series_id}: {str(e)}")
-            return Che168SearchResponse(
-                returncode=-1,
-                message=f"Service error: {str(e)}",
-                result={},
-                success=False
-            )
-
-    async def translate_text(self, text: str, target_language: str = "ru") -> TranslationResponse:
-        """
-        Translate Chinese text to target language (Russian by default)
-
-        Args:
-            text: Chinese text to translate
-            target_language: Target language code (default: "ru")
-
-        Returns:
-            TranslationResponse with translation result
-        """
-        try:
-            # In a real implementation, you would use a translation service like:
-            # - Google Translate API
-            # - Baidu Translate API
-            # - Microsoft Translator
-            # - Or a local translation model
-
-            # For now, return a placeholder implementation
-            # This should be replaced with actual translation service
-
-            translation_data = {
-                "originalText": text,
-                "translatedText": text,  # Placeholder - should be actual translation
-                "sourceLanguage": "zh-cn",
-                "targetLanguage": target_language,
-                "type": "analysis",
-                "isStatic": False,
-                "isCached": False,
-                "success": True
-            }
-
-            result = self.parser.parse_translation_response(translation_data)
-            return result
-
-        except Exception as e:
-            logger.error(f"Error in translate_text: {str(e)}")
-            return TranslationResponse(
-                original_text=text,
-                translated_text=text,
-                source_language="zh-cn",
-                target_language=target_language,
-                type="analysis",
-                success=False
-            )
-
-    def get_session_info(self) -> Dict[str, Any]:
-        """Get current session information including cache statistics"""
-        return {
-            "device_id": self.device_id,
-            "request_count": self.request_count,
-            "cookies_count": len(self.session.cookies),
-            "last_request": self.last_request_time,
-            "cache_status": {
-                "brands_cached": self.brands_cache is not None,
-                "models_cache_size": len(self.models_cache),
-                "years_cache_size": len(self.years_cache),
-            },
-            "failed_request_cache": self.failed_request_cache.get_stats(),
-            "circuit_breaker": {
-                "failures": self.circuit_breaker_failures,
-                "is_open": time.time() < self.circuit_breaker_cooldown_until,
-                "cooldown_remaining": max(0, int(self.circuit_breaker_cooldown_until - time.time()))
-            }
-        }
-
     async def get_car_info(self, info_id: int) -> Che168CarInfoResponse:
         """
         Get basic car information using Che168 getcarinfo API
@@ -957,29 +713,22 @@ class Che168Service:
             Che168CarInfoResponse with basic car information
         """
         try:
-            url = "https://apiuscdt.che168.com/apic/v2/car/getcarinfo"
-
             params = {
                 "infoid": str(info_id),
                 "_appid": "2sc.m"
             }
 
-            # Use proxy client to avoid 514 rate limiting errors
-            if self.proxy_client and hasattr(self.proxy_client, 'session'):
-                response = self.proxy_client.session.get(url, params=params)
-            else:
-                response = self.session.get(url, params=params)
-            response.raise_for_status()
-            json_data = response.json()
+            json_data = await self._make_request(
+                CHE168_DETAIL_API,
+                "/apic/v2/car/getcarinfo",
+                params
+            )
 
-            # Create response using the schema
             if json_data.get("returncode") == 0 and "result" in json_data:
-                result_data = json_data["result"]
-
                 return Che168CarInfoResponse(
                     returncode=json_data.get("returncode", 0),
                     message=json_data.get("message", "Success"),
-                    result=result_data
+                    result=json_data["result"]
                 )
             else:
                 return Che168CarInfoResponse(
@@ -1007,29 +756,22 @@ class Che168Service:
             Che168CarParamsResponse with car specifications
         """
         try:
-            url = "https://apiuscdt.che168.com/api/v1/car/getparamtypeitems"
-
             params = {
                 "infoid": str(info_id),
                 "_appid": "2sc.m"
             }
 
-            # Use proxy client to avoid 514 rate limiting errors
-            if self.proxy_client and hasattr(self.proxy_client, 'session'):
-                response = self.proxy_client.session.get(url, params=params)
-            else:
-                response = self.session.get(url, params=params)
-            response.raise_for_status()
-            json_data = response.json()
+            json_data = await self._make_request(
+                CHE168_DETAIL_API,
+                "/api/v1/car/getparamtypeitems",
+                params
+            )
 
-            # Create response using the schema
             if json_data.get("returncode") == 0 and "result" in json_data:
-                result_data = json_data["result"]
-
                 return Che168CarParamsResponse(
                     returncode=json_data.get("returncode", 0),
                     message=json_data.get("message", "Success"),
-                    result=result_data
+                    result=json_data["result"]
                 )
             else:
                 return Che168CarParamsResponse(
@@ -1046,10 +788,52 @@ class Che168Service:
                 result=[]
             )
 
+    async def get_filters(self) -> Che168FiltersResponse:
+        """
+        Get available filter options
+
+        Returns:
+            Che168FiltersResponse with available filters
+        """
+        try:
+            brands_result = await self.get_brands()
+
+            if brands_result.returncode != 0:
+                return Che168FiltersResponse(
+                    success=False,
+                    brands=[],
+                    price_ranges=[],
+                    age_ranges=[],
+                    mileage_ranges=[],
+                    fuel_types=[],
+                    transmissions=[],
+                    displacements=[]
+                )
+
+            all_brands = []
+            for brand_group in brands_result.result.values():
+                if isinstance(brand_group, list):
+                    all_brands.extend(brand_group)
+
+            result = self.parser.create_filters_response(all_brands)
+            return result
+
+        except Exception as e:
+            logger.error(f"Error in get_filters: {str(e)}")
+            return Che168FiltersResponse(
+                success=False,
+                brands=[],
+                price_ranges=[],
+                age_ranges=[],
+                mileage_ranges=[],
+                fuel_types=[],
+                transmissions=[],
+                displacements=[]
+            )
+
     async def get_car_analysis(self, info_id: int) -> Che168CarAnalysisResponse:
         """
-        Get car analysis and evaluation using Che168 getcaranalysis API
-        Note: This endpoint is currently not available on Che168 API
+        Get car analysis and evaluation (placeholder - not available on Che168 API)
 
         Args:
             info_id: Car listing ID
@@ -1057,20 +841,58 @@ class Che168Service:
         Returns:
             Che168CarAnalysisResponse with car analysis data
         """
-        try:
-            # The getcaranalysis endpoint is not available on Che168 API
-            # Return a default response indicating no analysis data available
-            logger.info(f"Car analysis not available for {info_id} - endpoint does not exist")
-            return Che168CarAnalysisResponse(
-                returncode=0,
-                message="Analysis data not available for this vehicle",
-                result={}
-            )
+        logger.info(f"Car analysis not available for {info_id} - endpoint does not exist")
+        return Che168CarAnalysisResponse(
+            returncode=0,
+            message="Analysis data not available for this vehicle",
+            result={}
+        )
 
-        except Exception as e:
-            logger.error(f"Error in get_car_analysis for {info_id}: {str(e)}")
-            return Che168CarAnalysisResponse(
-                returncode=-1,
-                message=f"Service error: {str(e)}",
-                result={}
-            )
+    async def translate_text(self, text: str, target_language: str = "ru") -> TranslationResponse:
+        """
+        Translate Chinese text to target language
+
+        Args:
+            text: Chinese text to translate
+            target_language: Target language code (default: "ru")
+
+        Returns:
+            TranslationResponse with translation result
+        """
+        # Placeholder - should be replaced with actual translation service
+        return TranslationResponse(
+            original_text=text,
+            translated_text=text,
+            source_language="zh-cn",
+            target_language=target_language,
+            type="analysis",
+            is_static=False,
+            is_cached=False,
+            success=True
+        )
+
+    def get_session_info(self) -> Dict[str, Any]:
+        """Get current session information including cache statistics"""
+        return {
+            "proxy_url": BRAVOMOTORS_PROXY_URL,
+            "request_count": self.request_count,
+            "last_request": self.last_request_time,
+            "cache_stats": {
+                "size": len(self.cache),
+                "volume": self.cache.volume(),
+            },
+            "circuit_breaker": {
+                "failures": self.circuit_breaker_failures,
+                "is_open": time.time() < self.circuit_breaker_cooldown_until,
+                "cooldown_remaining": max(0, int(self.circuit_breaker_cooldown_until - time.time()))
+            }
+        }
+
+    def clear_cache(self):
+        """Clear all cached data"""
+        self.cache.clear()
+        logger.info("Cache cleared")
+
+    def update_cookies(self, new_cookies: Dict[str, str]):
+        """Update session cookies (not used with proxy, kept for compatibility)"""
+        pass

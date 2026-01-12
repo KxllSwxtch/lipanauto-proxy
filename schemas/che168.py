@@ -305,7 +305,7 @@ class Che168CarDetailResponse(BaseModel):
     """Car detail response"""
 
     success: bool = True
-    car: Optional[Che168CarListing] = None
+    car: Optional[Dict[str, Any]] = None  # Flexible dict for car details
     error: Optional[str] = None
     meta: Optional[Dict[str, Any]] = None
 
