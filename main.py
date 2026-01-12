@@ -98,15 +98,42 @@ app.add_middleware(
 )
 
 # Конфигурация residential прокси (из переменных окружения)
-OXYLABS_PROXY = os.getenv("OXYLABS_PROXY", "ru-pr.oxylabs.io:10000")
+# Russian proxy - for Encar catalog
+OXYLABS_RU_PROXY = os.getenv("OXYLABS_RU_PROXY", "ru-pr.oxylabs.io:10000")
+# Korean proxy - for bikes and Chinese cars
+OXYLABS_KR_PROXY = os.getenv("OXYLABS_KR_PROXY", "kr-pr.oxylabs.io:10000")
+# Shared auth credentials
 OXYLABS_AUTH = os.getenv("OXYLABS_AUTH", "customer-tiksanauto_M2zEp:Tiksan_auto99")
 
+# Legacy PROXY_CONFIGS for backward compatibility (uses RU proxy)
 PROXY_CONFIGS = [
     {
         "name": "Oxylabs Russia",
-        "proxy": OXYLABS_PROXY,
+        "proxy": OXYLABS_RU_PROXY,
         "auth": OXYLABS_AUTH,
         "location": "Russia",
+        "provider": "oxylabs",
+    },
+]
+
+# Russian proxy config - for Encar catalog
+RU_PROXY_CONFIGS = [
+    {
+        "name": "Oxylabs Russia",
+        "proxy": OXYLABS_RU_PROXY,
+        "auth": OXYLABS_AUTH,
+        "location": "Russia",
+        "provider": "oxylabs",
+    },
+]
+
+# Korean proxy config - for bikes and Chinese cars (Che168)
+KR_PROXY_CONFIGS = [
+    {
+        "name": "Oxylabs Korea",
+        "proxy": OXYLABS_KR_PROXY,
+        "auth": OXYLABS_AUTH,
+        "location": "South Korea",
         "provider": "oxylabs",
     },
 ]
@@ -153,12 +180,21 @@ BASE_HEADERS = {
 class EncarProxyClient:
     """Продвинутый клиент для обхода защиты Encar API с residential прокси"""
 
-    def __init__(self):
+    def __init__(self, proxy_configs=None, name="default"):
+        """
+        Initialize proxy client with optional custom proxy configuration.
+
+        Args:
+            proxy_configs: Optional list of proxy configurations. If None, uses global PROXY_CONFIGS.
+            name: Client name for logging purposes (e.g., "RU", "KR")
+        """
         self.session = requests.Session()
         self.current_proxy_index = 0
         self.request_count = 0
         self.last_request_time = 0
         self.session_rotation_count = 0
+        self.proxy_configs = proxy_configs if proxy_configs is not None else PROXY_CONFIGS
+        self.client_name = name
 
         # Базовая конфигурация сессии
         self.session.timeout = (10, 30)  # connect timeout, read timeout
@@ -230,15 +266,15 @@ class EncarProxyClient:
 
     def _rotate_proxy(self):
         """Ротация residential прокси"""
-        if PROXY_CONFIGS:
-            proxy_info = PROXY_CONFIGS[self.current_proxy_index % len(PROXY_CONFIGS)]
+        if self.proxy_configs:
+            proxy_info = self.proxy_configs[self.current_proxy_index % len(self.proxy_configs)]
             proxy_config = get_proxy_config(proxy_info)
             self.session.proxies = proxy_config
             self.current_proxy_index += 1
             logger.info(
-                f"Switched to {proxy_info['name']} ({proxy_info['location']}) via {proxy_info['provider']}"
+                f"[{self.client_name}] Switched to {proxy_info['name']} ({proxy_info['location']}) via {proxy_info['provider']}"
             )
-            logger.info(f"Proxy: {proxy_info['proxy']}")
+            logger.info(f"[{self.client_name}] Proxy: {proxy_info['proxy']}")
 
     def _create_new_session(self):
         """Создает новую сессию для полного сброса IP"""
@@ -401,19 +437,22 @@ class EncarProxyClient:
         return {"success": False, "error": "Max retries exceeded", "url": url}
 
 
-# Глобальный клиент
-proxy_client = EncarProxyClient()
+# Глобальный клиент с RU прокси (для Encar каталога)
+proxy_client = EncarProxyClient(proxy_configs=RU_PROXY_CONFIGS, name="RU")
+# KR прокси клиент (для мотоциклов и китайских авто)
+kr_proxy_client = EncarProxyClient(proxy_configs=KR_PROXY_CONFIGS, name="KR")
 
 # Initialize services
-bike_service = BikeService(proxy_client)
+# Bikes use KR proxy (bobaedream.co.kr is accessed better from Korean IPs)
+bike_service = BikeService(kr_proxy_client)
 # Initialize VLB customs service WITHOUT proxy for direct access (replaces TKS)
 vlb_customs_service = VLBCustomsService(proxy_client=None)
-# Initialize KBChaChaCha service WITH proxy for Korean site access
+# Initialize KBChaChaCha service WITH RU proxy for Korean site access
 kbchachacha_service = KBChaChaService(proxy_client)
-# Initialize BravoMotors service WITH proxy for Chinese site access
-bravomotors_service = BravoMotorsService(proxy_client)
-# Initialize Che168 service WITH proxy for Chinese site access (fixes 514 rate limiting)
-che168_service = Che168Service(proxy_client)
+# Initialize BravoMotors service WITH KR proxy for Chinese site access
+bravomotors_service = BravoMotorsService(kr_proxy_client)
+# Initialize Che168 service WITH KR proxy for Chinese site access (fixes 514 rate limiting)
+che168_service = Che168Service(kr_proxy_client)
 
 
 @app.on_event("shutdown")
@@ -422,6 +461,8 @@ async def shutdown_event():
     logger.info("Shutting down server...")
     if hasattr(proxy_client, "session"):
         proxy_client.session.close()
+    if hasattr(kr_proxy_client, "session"):
+        kr_proxy_client.session.close()
     logger.info("Sessions closed")
 
 
@@ -960,46 +1001,49 @@ async def search_bikes_with_filters(filters: BikeSearchFilters):
 @app.get("/health")
 async def health_check():
     """Проверка здоровья сервиса"""
-    current_proxy_info = None
-    if PROXY_CONFIGS:
-        current_index = (proxy_client.current_proxy_index - 1) % len(PROXY_CONFIGS)
-        current_proxy_info = PROXY_CONFIGS[current_index]
+    # RU proxy info (for Encar catalog)
+    ru_proxy_info = None
+    if RU_PROXY_CONFIGS:
+        ru_index = (proxy_client.current_proxy_index - 1) % len(RU_PROXY_CONFIGS)
+        ru_proxy_info = RU_PROXY_CONFIGS[ru_index]
 
-    # Собираем информацию о всех провайдерах
-    providers = {}
-    for config in PROXY_CONFIGS:
-        provider = config["provider"]
-        if provider not in providers:
-            providers[provider] = 0
-        providers[provider] += 1
+    # KR proxy info (for bikes and Chinese cars)
+    kr_proxy_info = None
+    if KR_PROXY_CONFIGS:
+        kr_index = (kr_proxy_client.current_proxy_index - 1) % len(KR_PROXY_CONFIGS)
+        kr_proxy_info = KR_PROXY_CONFIGS[kr_index]
 
     # Get che168 service statistics
     che168_stats = che168_service.get_session_info()
 
     return {
         "status": "healthy",
-        "proxy_client": {
-            "request_count": proxy_client.request_count,
-            "session_rotations": proxy_client.session_rotation_count,
-            "current_proxy": (
-                current_proxy_info["name"] if current_proxy_info else "None"
-            ),
-            "current_provider": (
-                current_proxy_info["provider"] if current_proxy_info else "None"
-            ),
-            "current_location": (
-                current_proxy_info["location"] if current_proxy_info else "Direct"
-            ),
-            "available_proxies": len(PROXY_CONFIGS),
-            "providers": providers,
-            "proxy_type": "Residential multi-provider with session rotation",
+        "proxy_clients": {
+            "ru_proxy": {
+                "name": "RU Proxy (Encar catalog)",
+                "request_count": proxy_client.request_count,
+                "session_rotations": proxy_client.session_rotation_count,
+                "current_proxy": ru_proxy_info["name"] if ru_proxy_info else "None",
+                "current_location": ru_proxy_info["location"] if ru_proxy_info else "Direct",
+                "proxy_url": ru_proxy_info["proxy"] if ru_proxy_info else "None",
+                "used_by": ["encar_api", "kbchachacha"],
+            },
+            "kr_proxy": {
+                "name": "KR Proxy (Bikes & Chinese cars)",
+                "request_count": kr_proxy_client.request_count,
+                "session_rotations": kr_proxy_client.session_rotation_count,
+                "current_proxy": kr_proxy_info["name"] if kr_proxy_info else "None",
+                "current_location": kr_proxy_info["location"] if kr_proxy_info else "Direct",
+                "proxy_url": kr_proxy_info["proxy"] if kr_proxy_info else "None",
+                "used_by": ["bobaedream_bikes", "che168_chinese", "bravomotors_chinese"],
+            },
         },
         "services": {
-            "encar_api": "✅ Active (cars) - with proxy",
-            "bobaedream_bikes": "✅ Active (motorcycles) - with proxy",
-            "kbchachacha_korean": "✅ Active (korean cars) - with proxy",
-            "bravomotors_chinese": "✅ Active (chinese cars via bravomotors) - with proxy",
-            "che168_chinese": "🚀 OPTIMIZED (chinese cars via che168.com) - with smart retry & caching",
+            "encar_api": "✅ Active (cars) - RU proxy",
+            "bobaedream_bikes": "✅ Active (motorcycles) - KR proxy",
+            "kbchachacha_korean": "✅ Active (korean cars) - RU proxy",
+            "bravomotors_chinese": "✅ Active (chinese cars via bravomotors) - KR proxy",
+            "che168_chinese": "🚀 OPTIMIZED (chinese cars via che168.com) - KR proxy + smart retry",
             "tks_customs": "🚀 OPTIMIZED (customs calculator) - direct connection + CAPTCHA caching",
             "parser_engine": "BeautifulSoup4 + lxml",
             "captcha_solver": "CapSolver API integration + background pre-solving",
@@ -1081,13 +1125,25 @@ async def root():
             "Enhanced query parameter validation",
         ],
         "platforms": {
-            "encar.com": "Car listings and navigation (via proxy)",
-            "bobaedream.co.kr": "Motorcycle listings and details (via proxy)",
-            "kbchachacha.com": "Korean car marketplace - manufacturers, models, search (via proxy)",
+            "encar.com": "Car listings and navigation (RU proxy)",
+            "bobaedream.co.kr": "Motorcycle listings and details (KR proxy)",
+            "kbchachacha.com": "Korean car marketplace - manufacturers, models, search (RU proxy)",
+            "che168.com": "Chinese car marketplace (KR proxy)",
             "tks.ru": "Russian customs duty calculator (direct connection)",
         },
-        "providers": [config["provider"] for config in PROXY_CONFIGS],
-        "total_proxies": len(PROXY_CONFIGS),
+        "proxy_configuration": {
+            "ru_proxy": {
+                "providers": [config["provider"] for config in RU_PROXY_CONFIGS],
+                "count": len(RU_PROXY_CONFIGS),
+                "used_for": ["encar.com", "kbchachacha.com"],
+            },
+            "kr_proxy": {
+                "providers": [config["provider"] for config in KR_PROXY_CONFIGS],
+                "count": len(KR_PROXY_CONFIGS),
+                "used_for": ["bobaedream.co.kr", "che168.com"],
+            },
+        },
+        "total_proxies": len(RU_PROXY_CONFIGS) + len(KR_PROXY_CONFIGS),
         "api_status": {
             "bikes_core": "✅ Fully operational",
             "bikes_filters": "✅ COMPLETELY FIXED (100% success rate)",
