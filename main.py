@@ -98,15 +98,15 @@ app.add_middleware(
 )
 
 # Конфигурация residential прокси (из переменных окружения)
-OXYLABS_PROXY = os.getenv("OXYLABS_PROXY", "kr-pr.oxylabs.io:30000")
+OXYLABS_PROXY = os.getenv("OXYLABS_PROXY", "ru-pr.oxylabs.io:10000")
 OXYLABS_AUTH = os.getenv("OXYLABS_AUTH", "customer-tiksanauto_M2zEp:Tiksan_auto99")
 
 PROXY_CONFIGS = [
     {
-        "name": "Oxylabs Korea",
+        "name": "Oxylabs Russia",
         "proxy": OXYLABS_PROXY,
         "auth": OXYLABS_AUTH,
-        "location": "South Korea",
+        "location": "Russia",
         "provider": "oxylabs",
     },
 ]
