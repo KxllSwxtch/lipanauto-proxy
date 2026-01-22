@@ -479,12 +479,11 @@ async def handle_api_request(endpoint: str, params: Dict[str, str]) -> JSONRespo
 
     # Формируем URL
     param_string = "&".join([f"{k}={v}" for k, v in encoded_params.items()])
-    primary_url = f"https://encar-proxy.habsida.net/api/{endpoint}?{param_string}"
+    primary_url = f"https://cars.82auto.com/api/encar/{endpoint}?{param_string}"
 
     # Backup URL с исходными параметрами
     backup_param_string = "&".join([f"{k}={v}" for k, v in params.items()])
-    backup_url = f"https://encar-proxy.habsida.net/api/{endpoint}?{backup_param_string}"
-
+    backup_url = f"https://cars.82auto.com/api/encar/{endpoint}?{backup_param_string}"
     attempts = []
 
     # Пробуем основной URL
