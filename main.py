@@ -98,12 +98,12 @@ app.add_middleware(
 )
 
 # Конфигурация residential прокси (из переменных окружения)
-# Russian proxy - for Encar catalog
-OXYLABS_RU_PROXY = os.getenv("OXYLABS_RU_PROXY", "ru-pr.oxylabs.io:10000")
-# Korean proxy - for bikes and Chinese cars
-OXYLABS_KR_PROXY = os.getenv("OXYLABS_KR_PROXY", "kr-pr.oxylabs.io:10000")
+# Russian proxy - for Encar catalog (port 40000)
+OXYLABS_RU_PROXY = os.getenv("OXYLABS_RU_PROXY", "ru-pr.oxylabs.io:40000")
+# Korean proxy - for bikes and Chinese cars (port 40000)
+OXYLABS_KR_PROXY = os.getenv("OXYLABS_KR_PROXY", "kr-pr.oxylabs.io:40000")
 # Shared auth credentials
-OXYLABS_AUTH = os.getenv("OXYLABS_AUTH", "customer-tiksanauto_M2zEp:Tiksan_auto99")
+OXYLABS_AUTH = os.getenv("OXYLABS_AUTH", "customer-kingmotors_backup_NoKZD:b32D=xjQ=57ol6~F")
 
 # Legacy PROXY_CONFIGS for backward compatibility (uses RU proxy)
 PROXY_CONFIGS = [
