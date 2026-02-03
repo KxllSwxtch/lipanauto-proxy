@@ -6,8 +6,7 @@ import asyncio
 import random
 import time
 import re
-import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Union, Annotated
 from fastapi import FastAPI, Query, HTTPException, Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -163,111 +162,16 @@ USER_AGENTS = [
 ]
 
 
-# Базовые заголовки для cars.82auto.com
+# Базовые заголовки для api.encar.com (direct access - no token required)
 BASE_HEADERS = {
-    "accept": "*/*",
-    "accept-language": "en,ru;q=0.9,en-CA;q=0.8,la;q=0.7,fr;q=0.6,ko;q=0.5",
-    "origin": "https://cars.82auto.com",
-    "priority": "u=1, i",
-    "referer": "https://cars.82auto.com/",
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"macOS"',
+    "accept": "application/json, text/javascript, */*; q=0.01",
+    "accept-language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    "origin": "http://www.encar.com",
+    "referer": "http://www.encar.com/",
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-origin",
+    "sec-fetch-site": "same-site",
 }
-
-
-class TokenManager:
-    """Manages x-api-token for cars.82auto.com authentication"""
-
-    def __init__(self):
-        self._token: Optional[str] = None
-        self._token_expiry: Optional[datetime] = None
-        self._lock = threading.Lock()
-        self._token_ttl = timedelta(hours=1)  # Refresh token every hour
-
-    def get_token(self, session: requests.Session, headers: Dict[str, str]) -> Optional[str]:
-        """Get a valid token, fetching a new one if needed"""
-        with self._lock:
-            # Check if token is still valid
-            if self._token and self._token_expiry and datetime.now() < self._token_expiry:
-                return self._token
-
-            # Fetch new token
-            return self._fetch_new_token(session, headers)
-
-    def _fetch_new_token(self, session: requests.Session, headers: Dict[str, str]) -> Optional[str]:
-        """Fetch a fresh token from cars.82auto.com"""
-        try:
-            logger.info("Fetching new x-api-token from cars.82auto.com...")
-
-            # Request the main page to get the token cookie
-            response = session.get(
-                "https://cars.82auto.com/",
-                headers=headers,
-                timeout=30
-            )
-
-            logger.info(f"Token fetch response status: {response.status_code}")
-
-            # Check for x-api-token in cookies
-            token = response.cookies.get('x-api-token')
-
-            if token:
-                self._token = token
-                self._token_expiry = datetime.now() + self._token_ttl
-                logger.info(f"Successfully obtained x-api-token (expires in {self._token_ttl})")
-                return token
-
-            # Try to extract from Set-Cookie header
-            set_cookie = response.headers.get('Set-Cookie', '')
-            if 'x-api-token=' in set_cookie:
-                match = re.search(r'x-api-token=([^;]+)', set_cookie)
-                if match:
-                    self._token = match.group(1)
-                    self._token_expiry = datetime.now() + self._token_ttl
-                    logger.info("Extracted x-api-token from Set-Cookie header")
-                    return self._token
-
-            # Check session cookies as fallback
-            if 'x-api-token' in session.cookies:
-                self._token = session.cookies.get('x-api-token')
-                self._token_expiry = datetime.now() + self._token_ttl
-                logger.info("Extracted x-api-token from session cookies")
-                return self._token
-
-            logger.warning("Could not obtain x-api-token from response")
-            logger.debug(f"Response cookies: {dict(response.cookies)}")
-            logger.debug(f"Set-Cookie header: {set_cookie[:200] if set_cookie else 'None'}")
-            return None
-
-        except Exception as e:
-            logger.error(f"Error fetching token: {e}")
-            return None
-
-    def invalidate(self):
-        """Invalidate the current token (call on 401)"""
-        with self._lock:
-            self._token = None
-            self._token_expiry = None
-            logger.info("Token invalidated - will fetch new one on next request")
-
-    def get_current_token(self) -> Optional[str]:
-        """Get current token without fetching (for health checks)"""
-        return self._token
-
-    def is_valid(self) -> bool:
-        """Check if current token is still valid"""
-        return (
-            self._token is not None
-            and self._token_expiry is not None
-            and datetime.now() < self._token_expiry
-        )
-
-
-# Global token manager for cars.82auto.com authentication
-token_manager = TokenManager()
 
 
 class EncarProxyClient:
@@ -435,22 +339,13 @@ class EncarProxyClient:
                 # Получаем свежие заголовки
                 headers = self._get_dynamic_headers()
 
-                # Get authentication token for cars.82auto.com
-                token = token_manager.get_token(self.session, headers)
-                cookies = {}
-                if token:
-                    cookies['x-api-token'] = token
-                    logger.info(f"[{self.client_name}] Using x-api-token: {token[:30]}...")
-                else:
-                    logger.warning(f"[{self.client_name}] No x-api-token available - request may fail with 401")
-
                 logger.info(f"[{self.client_name}] Attempt {attempt + 1}/{max_retries}: {url}")
                 logger.info(f"[{self.client_name}] Using UA: {headers['user-agent'][:50]}...")
 
-                # Выполняем запрос в отдельном потоке WITH cookies
+                # Выполняем запрос в отдельном потоке
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
-                    None, lambda: self.session.get(url, headers=headers, cookies=cookies)
+                    None, lambda: self.session.get(url, headers=headers)
                 )
 
                 logger.info(f"[{self.client_name}] Response status: {response.status_code}")
@@ -465,8 +360,8 @@ class EncarProxyClient:
                         "attempt": attempt + 1,
                     }
                 elif response.status_code == 401:
-                    logger.warning(f"[{self.client_name}] 401 Unauthorized - invalidating token and retrying")
-                    token_manager.invalidate()
+                    logger.warning(f"[{self.client_name}] 401 Unauthorized - rotating proxy and retrying")
+                    self._rotate_proxy()
                     await asyncio.sleep(1)
                     continue
                 elif response.status_code == 403:
@@ -574,7 +469,16 @@ async def shutdown_event():
 
 
 async def handle_api_request(endpoint: str, params: Dict[str, str]) -> JSONResponse:
-    """Универсальный обработчик API запросов"""
+    """Универсальный обработчик API запросов через прямой api.encar.com"""
+
+    # Маппинг endpoints на пути api.encar.com
+    # Both catalog and nav use the premium endpoint, nav just includes navigation/filter data via inav param
+    api_paths = {
+        "catalog": "search/car/list/premium",
+        "nav": "search/car/list/premium",
+    }
+
+    api_path = api_paths.get(endpoint, endpoint)
 
     # Кодируем параметры
     encoded_params = {}
@@ -584,13 +488,13 @@ async def handle_api_request(endpoint: str, params: Dict[str, str]) -> JSONRespo
         else:
             encoded_params[key] = value
 
-    # Формируем URL
+    # Формируем URL для прямого api.encar.com (no token required)
     param_string = "&".join([f"{k}={v}" for k, v in encoded_params.items()])
-    primary_url = f"https://cars.82auto.com/api/encar/{endpoint}?{param_string}"
+    primary_url = f"http://api.encar.com/{api_path}?{param_string}"
 
-    # Backup URL с исходными параметрами
+    # Backup URL с исходными параметрами (без кодирования |)
     backup_param_string = "&".join([f"{k}={v}" for k, v in params.items()])
-    backup_url = f"https://cars.82auto.com/api/encar/{endpoint}?{backup_param_string}"
+    backup_url = f"http://api.encar.com/{api_path}?{backup_param_string}"
     attempts = []
 
     # Пробуем основной URL
@@ -1122,17 +1026,9 @@ async def health_check():
     # Get che168 service statistics
     che168_stats = che168_service.get_session_info()
 
-    # Token manager status for cars.82auto.com authentication
-    current_token = token_manager.get_current_token()
-    token_status = {
-        "has_token": current_token is not None,
-        "is_valid": token_manager.is_valid(),
-        "token_preview": f"{current_token[:30]}..." if current_token else None,
-    }
-
     return {
         "status": "healthy",
-        "token_manager": token_status,
+        "api_mode": "Direct api.encar.com (no token required)",
         "proxy_clients": {
             "ru_proxy": {
                 "name": "RU Proxy (Encar catalog)",
@@ -1154,7 +1050,7 @@ async def health_check():
             },
         },
         "services": {
-            "encar_api": "✅ Active (cars) - RU proxy + x-api-token auth",
+            "encar_api": "✅ Active (cars) - direct api.encar.com via RU proxy",
             "bobaedream_bikes": "✅ Active (motorcycles) - KR proxy",
             "kbchachacha_korean": "✅ Active (korean cars) - RU proxy",
             "bravomotors_chinese": "✅ Active (chinese cars via bravomotors) - KR proxy",
@@ -1226,9 +1122,8 @@ async def root():
         },
         "features": [
             "User-Agent rotation",
-            "Multi-provider residential proxy rotation (Korea) - for cars & bikes",
-            "🚀 Auto x-api-token acquisition and refresh for cars.82auto.com",
-            "🚀 401 error recovery with automatic token refresh",
+            "Multi-provider residential proxy rotation - RU for cars, KR for bikes",
+            "🚀 Direct api.encar.com access (no token required)",
             "🚀 OPTIMIZED customs calculations - CAPTCHA caching + background pre-solving",
             "Direct connection for customs calculations (no proxy)",
             "Automatic session rotation on 403 errors",
@@ -1242,7 +1137,7 @@ async def root():
             "Enhanced query parameter validation",
         ],
         "platforms": {
-            "encar.com": "Car listings and navigation (RU proxy)",
+            "api.encar.com": "Car listings and navigation (RU proxy, direct API)",
             "bobaedream.co.kr": "Motorcycle listings and details (KR proxy)",
             "kbchachacha.com": "Korean car marketplace - manufacturers, models, search (RU proxy)",
             "che168.com": "Chinese car marketplace (KR proxy)",
