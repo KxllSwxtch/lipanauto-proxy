@@ -1,6 +1,8 @@
 """
 Che168 Service - Direct API Implementation
 Business logic layer for Chinese car marketplace integration via direct Che168 API access
+
+Updated with session bootstrapping to handle signature validation requirements.
 """
 
 import asyncio
@@ -9,6 +11,7 @@ import json
 import logging
 import time
 import random
+import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from urllib.parse import urlencode
@@ -34,6 +37,9 @@ from schemas.che168 import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Known signature error messages from Che168 API
+SIGNATURE_ERROR_MESSAGES = ["签名错误", "signature error", "sign error", "invalid sign"]
 
 # Che168 API Base URLs (direct access)
 CHE168_SEARCH_API = "https://api2scsou.che168.com"
@@ -144,6 +150,13 @@ class Che168Service:
         # Session management
         self.session = requests.Session()
 
+        # Session bootstrapping state (for signature authentication)
+        self._session_initialized = False
+        self._session_cookies = None
+        self._last_session_time = 0
+        self._session_ttl = 300  # 5 minutes session validity
+        self._device_id = str(uuid.uuid4()).replace('-', '')[:32]  # Persistent device ID
+
         # Rate limiting
         self.last_request_time = 0
         self.request_count = 0
@@ -165,6 +178,10 @@ class Che168Service:
 
         # Track which header set works better
         self.use_mobile_headers = True
+
+        # Track consecutive signature errors
+        self._signature_error_count = 0
+        self._max_signature_errors = 2  # After 2 signature errors, use static fallback
 
         # Setup session
         self._setup_session()
@@ -205,6 +222,108 @@ class Che168Service:
             return self.proxy_client.session.proxies
 
         return None
+
+    async def _bootstrap_session(self) -> bool:
+        """
+        Initialize session by visiting mobile site to obtain valid cookies.
+        This establishes authentication context required for API requests.
+
+        Returns:
+            True if session was successfully bootstrapped, False otherwise
+        """
+        await self._rate_limit()
+
+        try:
+            logger.info("Bootstrapping session by visiting m.che168.com...")
+            proxies = self._get_proxy_config()
+
+            # Visit mobile homepage to obtain session cookies
+            response = self.session.get(
+                "https://m.che168.com/",
+                headers=CHE168_MOBILE_HEADERS,
+                proxies=proxies,
+                timeout=(10, 30),
+                allow_redirects=True
+            )
+
+            if response.status_code == 200:
+                # Store cookies from response
+                self.session.cookies.update(response.cookies)
+                self._session_cookies = dict(response.cookies)
+                self._session_initialized = True
+                self._last_session_time = time.time()
+                self._signature_error_count = 0  # Reset error count on successful bootstrap
+                logger.info(f"Session bootstrapped successfully. Cookies: {list(response.cookies.keys())}")
+                return True
+            else:
+                logger.warning(f"Session bootstrap returned status {response.status_code}")
+
+        except Exception as e:
+            logger.error(f"Session bootstrap failed: {e}")
+
+        return False
+
+    def _is_session_valid(self) -> bool:
+        """Check if current session is still valid based on TTL"""
+        if not self._session_initialized:
+            return False
+        return (time.time() - self._last_session_time) < self._session_ttl
+
+    def _is_signature_error(self, response_data: Dict) -> bool:
+        """
+        Check if API response indicates a signature error
+
+        Args:
+            response_data: JSON response from API
+
+        Returns:
+            True if response indicates signature error
+        """
+        if not isinstance(response_data, dict):
+            return False
+
+        # Check returncode (non-zero typically indicates error)
+        returncode = response_data.get("returncode")
+        if returncode not in [0, None, "0"]:
+            message = str(response_data.get("message", "")).lower()
+            # Check for known signature error messages
+            for error_msg in SIGNATURE_ERROR_MESSAGES:
+                if error_msg.lower() in message:
+                    return True
+
+        return False
+
+    def _get_device_id(self) -> str:
+        """Get or generate a persistent device ID"""
+        return self._device_id
+
+    def _build_request_params(self, base_params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build complete request parameters with all required fields for Che168 API
+
+        Args:
+            base_params: Base parameters for the request
+
+        Returns:
+            Complete parameter dict with system params
+        """
+        params = dict(base_params)
+
+        # Required system params (observed in working API examples)
+        params['_appid'] = '2sc.m'
+        params['v'] = '11.41.5'
+        params['deviceid'] = self._get_device_id()
+        params['userid'] = '0'
+        params['s_pid'] = '0'
+        params['s_cid'] = '0'
+
+        # Session-specific params if available
+        if self._session_initialized and self._session_cookies:
+            session_id = self._session_cookies.get('sessionid', '')
+            if session_id:
+                params['sessionid'] = session_id
+
+        return params
 
     def _build_direct_url(self, base_url: str, endpoint_path: str, params: Dict[str, Any] = None) -> str:
         """
@@ -309,7 +428,7 @@ class Che168Service:
         endpoint_type: str = "search"
     ) -> Dict[str, Any]:
         """
-        Make HTTP request directly to Che168 API with proxy support
+        Make HTTP request directly to Che168 API with proxy support and session management
 
         Args:
             base_url: Che168 API base URL
@@ -326,13 +445,18 @@ class Che168Service:
         if params is None:
             params = {}
 
-        # Build the direct URL
-        url = self._build_direct_url(base_url, endpoint_path, params)
+        # Check if we should skip API and go straight to static fallback
+        # This happens after repeated signature errors
+        if self._signature_error_count >= self._max_signature_errors:
+            logger.info(f"Skipping API due to {self._signature_error_count} signature errors, using static fallback")
+            if endpoint_type in ["brands", "search"]:
+                fallback_data = await self._get_static_fallback(endpoint_type)
+                if fallback_data:
+                    return fallback_data
 
         # Check circuit breaker
         if not self._check_circuit_breaker(endpoint_type):
             logger.warning(f"Circuit breaker open for {endpoint_type}, trying static fallback")
-            # Try static fallback for brands and search
             if endpoint_type in ["brands", "search"]:
                 fallback_data = await self._get_static_fallback(endpoint_type)
                 if fallback_data:
@@ -343,6 +467,17 @@ class Che168Service:
                 "message": "Service temporarily unavailable (circuit breaker open)",
                 "result": {},
             }
+
+        # Ensure session is valid before making API request
+        if not self._is_session_valid():
+            logger.info("Session expired or not initialized, bootstrapping...")
+            await self._bootstrap_session()
+
+        # Build complete request params with system parameters
+        full_params = self._build_request_params(params)
+
+        # Build the direct URL
+        url = self._build_direct_url(base_url, endpoint_path, full_params)
 
         request_start_time = time.time()
         last_exception = None
@@ -371,13 +506,40 @@ class Che168Service:
                 # Parse JSON response
                 json_data = response.json()
 
+                # Check for signature error in response
+                if self._is_signature_error(json_data):
+                    self._signature_error_count += 1
+                    logger.warning(f"Signature error detected (count: {self._signature_error_count}): {json_data.get('message', 'Unknown')}")
+
+                    # Invalidate session and try to re-bootstrap
+                    self._session_initialized = False
+
+                    if attempt < max_retries:
+                        logger.info("Attempting to refresh session...")
+                        await self._bootstrap_session()
+                        # Rebuild params with new session data
+                        full_params = self._build_request_params(params)
+                        url = self._build_direct_url(base_url, endpoint_path, full_params)
+                        await asyncio.sleep(1)  # Brief delay before retry
+                        continue
+
+                    # All retries exhausted with signature errors, use static fallback
+                    if endpoint_type in ["brands", "search"]:
+                        fallback_data = await self._get_static_fallback(endpoint_type)
+                        if fallback_data:
+                            logger.info(f"Using static fallback after signature errors")
+                            return fallback_data
+
+                    return json_data
+
                 # Log slow requests
                 request_time = time.time() - request_start_time
                 if request_time > 5.0:
                     logger.warning(f"Slow request detected: {endpoint_path} took {request_time:.2f}s")
 
-                # Record success
+                # Record success and reset signature error count
                 self._record_success(endpoint_type)
+                self._signature_error_count = 0
 
                 return json_data
 
@@ -412,6 +574,13 @@ class Che168Service:
 
             except Exception as e:
                 logger.error(f"Unexpected error in request: {str(e)}")
+                # Try static fallback for unexpected errors too
+                if endpoint_type in ["brands", "search"]:
+                    fallback_data = await self._get_static_fallback(endpoint_type)
+                    if fallback_data:
+                        logger.info(f"Using static fallback after unexpected error")
+                        return fallback_data
+
                 return {
                     "returncode": 1,
                     "message": f"Unexpected error: {str(e)}",
@@ -487,11 +656,30 @@ class Che168Service:
             # Cache successful results
             if result.success:
                 self.cache.set(cache_key, result, expire=CACHE_TTL_SEARCH)
+                return result
+
+            # If result is not successful, try static fallback
+            if not result.success:
+                logger.warning(f"API returned unsuccessful result: {result.message}")
+                fallback_data = await self._get_static_fallback("search")
+                if fallback_data:
+                    logger.info("Using static fallback due to unsuccessful API response")
+                    return self.parser.parse_car_search_response(fallback_data)
 
             return result
 
         except Exception as e:
             logger.error(f"Error in search_cars: {str(e)}")
+
+            # Try static fallback on exception
+            try:
+                fallback_data = await self._get_static_fallback("search")
+                if fallback_data:
+                    logger.info("Using static fallback due to search exception")
+                    return self.parser.parse_car_search_response(fallback_data)
+            except Exception as fallback_error:
+                logger.error(f"Static fallback also failed: {fallback_error}")
+
             return Che168SearchResponse(
                 returncode=-1,
                 message=f"Service error: {str(e)}",
@@ -534,11 +722,30 @@ class Che168Service:
             # Cache successful results
             if result.returncode == 0:
                 self.cache.set(cache_key, result, expire=CACHE_TTL_BRANDS)
+                return result
+
+            # If result is not successful, try static fallback
+            if result.returncode != 0:
+                logger.warning(f"API returned unsuccessful result for brands: {result.message}")
+                fallback_data = await self._get_static_fallback("brands")
+                if fallback_data:
+                    logger.info("Using static fallback for brands due to unsuccessful API response")
+                    return self.parser.parse_brands_response(fallback_data)
 
             return result
 
         except Exception as e:
             logger.error(f"Error in get_brands: {str(e)}")
+
+            # Try static fallback on exception
+            try:
+                fallback_data = await self._get_static_fallback("brands")
+                if fallback_data:
+                    logger.info("Using static fallback for brands due to exception")
+                    return self.parser.parse_brands_response(fallback_data)
+            except Exception as fallback_error:
+                logger.error(f"Static fallback also failed for brands: {fallback_error}")
+
             return Che168BrandsResponse(
                 returncode=-1,
                 message=f"Service error: {str(e)}",
