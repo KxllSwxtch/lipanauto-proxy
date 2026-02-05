@@ -1,6 +1,6 @@
 """
-Che168 Service - BravoMotors Proxy Implementation
-Business logic layer for Chinese car marketplace integration via bravomotorrs.com proxy
+Che168 Service - Direct API Implementation
+Business logic layer for Chinese car marketplace integration via direct Che168 API access
 """
 
 import asyncio
@@ -9,8 +9,9 @@ import json
 import logging
 import time
 import random
+from pathlib import Path
 from typing import Dict, Any, Optional, List
-from urllib.parse import urlencode, quote
+from urllib.parse import urlencode
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -34,29 +35,100 @@ from schemas.che168 import (
 
 logger = logging.getLogger(__name__)
 
-# BravoMotors Proxy Configuration
-BRAVOMOTORS_PROXY_URL = "https://bravomotorrs.com/api/che168/data"
-
-# Che168 API Base URLs (used to construct proxy URLs)
+# Che168 API Base URLs (direct access)
 CHE168_SEARCH_API = "https://api2scsou.che168.com"
 CHE168_DETAIL_API = "https://apiuscdt.che168.com"
 
-# Cache TTLs (in seconds)
-CACHE_TTL_BRANDS = 3600      # 1 hour
-CACHE_TTL_MODELS = 1800      # 30 minutes
-CACHE_TTL_YEARS = 1800       # 30 minutes
-CACHE_TTL_SEARCH = 300       # 5 minutes
-CACHE_TTL_CAR_DETAIL = 600   # 10 minutes
+# Static fallback data directory
+STATIC_CACHE_DIR = Path(__file__).parent.parent / "Che168"
+
+# Cache TTLs (in seconds) - Extended for better reliability
+CACHE_TTL_BRANDS = 86400      # 24 hours (was 1 hour)
+CACHE_TTL_MODELS = 43200      # 12 hours (was 30 minutes)
+CACHE_TTL_YEARS = 43200       # 12 hours (was 30 minutes)
+CACHE_TTL_SEARCH = 900        # 15 minutes (was 5 minutes)
+CACHE_TTL_CAR_DETAIL = 1800   # 30 minutes (was 10 minutes)
+
+# Che168-specific headers for mobile API access
+CHE168_MOBILE_HEADERS = {
+    'accept': 'application/json, text/plain, */*',
+    'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'user-agent': 'Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36',
+    'referer': 'https://m.che168.com/',
+    'origin': 'https://m.che168.com',
+    'sec-ch-ua': '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+    'sec-ch-ua-mobile': '?1',
+    'sec-ch-ua-platform': '"Android"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-site',
+}
+
+# Alternative headers for desktop access (fallback)
+CHE168_DESKTOP_HEADERS = {
+    'accept': 'application/json, text/javascript, */*; q=0.01',
+    'accept-language': 'zh-CN,zh;q=0.9',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    'referer': 'https://www.che168.com/',
+    'origin': 'https://www.che168.com',
+    'sec-ch-ua': '"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-site',
+}
+
+
+class ProxyCircuitBreaker:
+    """Per-proxy circuit breaker for intelligent failover"""
+
+    def __init__(self, name: str, threshold: int = 5, reset_seconds: int = 30):
+        self.name = name
+        self.failures = 0
+        self.threshold = threshold
+        self.reset_seconds = reset_seconds
+        self.last_failure = 0
+        self.state = "closed"  # closed, open, half-open
+
+    def is_available(self) -> bool:
+        if self.state == "closed":
+            return True
+        if time.time() - self.last_failure > self.reset_seconds:
+            self.state = "half-open"
+            return True
+        return False
+
+    def record_success(self):
+        self.failures = 0
+        self.state = "closed"
+
+    def record_failure(self):
+        self.failures += 1
+        self.last_failure = time.time()
+        if self.failures >= self.threshold:
+            self.state = "open"
+            logger.warning(f"Circuit breaker '{self.name}' OPENED after {self.failures} failures")
+
+    def get_status(self) -> Dict[str, Any]:
+        return {
+            "name": self.name,
+            "state": self.state,
+            "failures": self.failures,
+            "threshold": self.threshold,
+            "time_until_reset": max(0, int(self.reset_seconds - (time.time() - self.last_failure))) if self.state == "open" else 0
+        }
 
 
 class Che168Service:
     """
-    Che168 service for Chinese car marketplace integration via BravoMotors proxy
+    Che168 service for Chinese car marketplace integration via direct API access
 
-    Routes all requests through bravomotorrs.com/api/che168/data which handles:
-    - Request forwarding to che168.com
-    - Authentication and session management
-    - Rate limiting and anti-bot measures
+    Routes all requests directly to che168.com APIs through proxy with:
+    - Mobile headers for better access
+    - Proxy rotation via provided proxy_client
+    - Circuit breaker for intelligent failover
+    - Static file fallback when API unavailable
 
     Provides comprehensive functionality for:
     - Car search with filters and pagination
@@ -66,7 +138,7 @@ class Che168Service:
     """
 
     def __init__(self, proxy_client=None):
-        self.proxy_client = proxy_client  # Not used with BravoMotors proxy
+        self.proxy_client = proxy_client
         self.parser = Che168Parser()
 
         # Session management
@@ -79,31 +151,28 @@ class Che168Service:
         # Disk-based cache
         self.cache = Cache('/tmp/che168_cache')
 
-        # Circuit breaker state
+        # Circuit breakers per endpoint type
+        self.circuit_breakers = {
+            "search": ProxyCircuitBreaker("search", threshold=5, reset_seconds=30),
+            "brands": ProxyCircuitBreaker("brands", threshold=3, reset_seconds=60),
+            "detail": ProxyCircuitBreaker("detail", threshold=5, reset_seconds=30),
+        }
+
+        # Legacy circuit breaker state (for backward compatibility)
         self.circuit_breaker_failures = 0
         self.circuit_breaker_last_reset = time.time()
         self.circuit_breaker_cooldown_until = 0
+
+        # Track which header set works better
+        self.use_mobile_headers = True
 
         # Setup session
         self._setup_session()
 
     def _setup_session(self):
-        """Setup session with BravoMotors proxy requirements"""
-        # Headers matching the user's cURL example
-        self.session.headers.update({
-            'accept': 'application/json',
-            'accept-language': 'en,ru;q=0.9,en-CA;q=0.8,la;q=0.7,fr;q=0.6,ko;q=0.5',
-            'content-type': 'application/json',
-            'priority': 'u=1, i',
-            'referer': 'https://bravomotorrs.com/catalog/cn',
-            'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"macOS"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-origin',
-            'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
-        })
+        """Setup session with direct Che168 API requirements"""
+        # Start with mobile headers (generally more successful)
+        self.session.headers.update(CHE168_MOBILE_HEADERS)
 
         # Session configuration
         self.session.timeout = (10, 30)  # connect, read timeout
@@ -126,27 +195,34 @@ class Che168Service:
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
 
-    def _build_proxy_url(self, original_url: str, params: Dict[str, Any] = None) -> str:
+    def _get_proxy_config(self) -> Optional[Dict[str, str]]:
+        """Get proxy configuration from proxy_client"""
+        if not self.proxy_client:
+            return None
+
+        # Use the proxy client's current proxy configuration
+        if hasattr(self.proxy_client, 'session') and hasattr(self.proxy_client.session, 'proxies'):
+            return self.proxy_client.session.proxies
+
+        return None
+
+    def _build_direct_url(self, base_url: str, endpoint_path: str, params: Dict[str, Any] = None) -> str:
         """
-        Build bravomotorrs.com proxy URL
+        Build direct Che168 API URL with parameters
 
         Args:
-            original_url: The original che168 API URL (base only, without params)
-            params: Query parameters to append
+            base_url: Che168 API base URL
+            endpoint_path: API endpoint path
+            params: Query parameters
 
         Returns:
-            Proxy URL with encoded che168 URL as parameter
+            Full URL with encoded parameters
         """
-        # Build the full che168 URL with params
+        full_url = f"{base_url}{endpoint_path}"
         if params:
             param_string = urlencode(params, safe='')
-            full_url = f"{original_url}?{param_string}"
-        else:
-            full_url = original_url
-
-        # URL encode the full che168 URL and wrap with proxy
-        encoded_url = quote(full_url, safe='')
-        return f"{BRAVOMOTORS_PROXY_URL}?url={encoded_url}"
+            full_url = f"{full_url}?{param_string}"
+        return full_url
 
     def _get_cache_key(self, prefix: str, params: Dict[str, Any] = None) -> str:
         """Generate a cache key from prefix and parameters"""
@@ -158,7 +234,7 @@ class Che168Service:
         return f"che168:{prefix}"
 
     async def _rate_limit(self):
-        """Rate limiting for BravoMotors proxy (200ms between requests)"""
+        """Rate limiting for Che168 API (200ms between requests)"""
         current_time = time.time()
         min_interval = 0.2  # 200ms between requests
 
@@ -172,43 +248,75 @@ class Che168Service:
         if self.request_count % 20 == 0:
             await asyncio.sleep(random.uniform(0.5, 1.5))
 
-    def _check_circuit_breaker(self) -> bool:
+    def _check_circuit_breaker(self, endpoint_type: str = "search") -> bool:
         """
-        Check if circuit breaker is open (requests should be blocked)
+        Check if circuit breaker allows requests
+
+        Args:
+            endpoint_type: Type of endpoint (search, brands, detail)
 
         Returns:
             True if requests are allowed, False if circuit is open
         """
-        current_time = time.time()
+        cb = self.circuit_breakers.get(endpoint_type, self.circuit_breakers["search"])
+        return cb.is_available()
 
-        # Reset failure counter every 60 seconds
-        if current_time - self.circuit_breaker_last_reset > 60:
-            self.circuit_breaker_failures = 0
-            self.circuit_breaker_last_reset = current_time
+    def _record_success(self, endpoint_type: str = "search"):
+        """Record successful request for circuit breaker"""
+        cb = self.circuit_breakers.get(endpoint_type, self.circuit_breakers["search"])
+        cb.record_success()
+        self.circuit_breaker_failures = 0
 
-        # Check if in cooldown period
-        if current_time < self.circuit_breaker_cooldown_until:
-            remaining = int(self.circuit_breaker_cooldown_until - current_time)
-            logger.warning(f"Circuit breaker is OPEN - cooldown for {remaining}s more")
-            return False
+    def _record_failure(self, endpoint_type: str = "search"):
+        """Record failed request for circuit breaker"""
+        cb = self.circuit_breakers.get(endpoint_type, self.circuit_breakers["search"])
+        cb.record_failure()
+        self.circuit_breaker_failures += 1
 
-        return True
+    async def _get_static_fallback(self, data_type: str) -> Optional[Dict]:
+        """
+        Load static fallback data when all API attempts fail
+
+        Args:
+            data_type: Type of data ('brands', 'search')
+
+        Returns:
+            Cached JSON data or None if not available
+        """
+        file_map = {
+            'brands': STATIC_CACHE_DIR / 'brands.json',
+            'search': STATIC_CACHE_DIR / 'cars.json',
+        }
+
+        file_path = file_map.get(data_type)
+        if file_path and file_path.exists():
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    logger.info(f"Loaded static fallback data for '{data_type}' from {file_path}")
+                    return data
+            except Exception as e:
+                logger.error(f"Failed to load static fallback for '{data_type}': {e}")
+
+        return None
 
     async def _make_request(
         self,
         base_url: str,
         endpoint_path: str,
         params: Dict = None,
-        max_retries: int = 2
+        max_retries: int = 3,
+        endpoint_type: str = "search"
     ) -> Dict[str, Any]:
         """
-        Make HTTP request through BravoMotors proxy
+        Make HTTP request directly to Che168 API with proxy support
 
         Args:
-            base_url: Che168 API base URL (e.g., CHE168_SEARCH_API or CHE168_DETAIL_API)
-            endpoint_path: API endpoint path (e.g., "/api/v11/search")
+            base_url: Che168 API base URL
+            endpoint_path: API endpoint path
             params: Query parameters
             max_retries: Maximum retry attempts
+            endpoint_type: Type of endpoint for circuit breaker
 
         Returns:
             JSON response data
@@ -218,14 +326,18 @@ class Che168Service:
         if params is None:
             params = {}
 
-        # Build the original che168 URL
-        original_url = f"{base_url}{endpoint_path}"
-
-        # Build proxy URL
-        proxy_url = self._build_proxy_url(original_url, params)
+        # Build the direct URL
+        url = self._build_direct_url(base_url, endpoint_path, params)
 
         # Check circuit breaker
-        if not self._check_circuit_breaker():
+        if not self._check_circuit_breaker(endpoint_type):
+            logger.warning(f"Circuit breaker open for {endpoint_type}, trying static fallback")
+            # Try static fallback for brands and search
+            if endpoint_type in ["brands", "search"]:
+                fallback_data = await self._get_static_fallback(endpoint_type)
+                if fallback_data:
+                    return fallback_data
+
             return {
                 "returncode": 503,
                 "message": "Service temporarily unavailable (circuit breaker open)",
@@ -235,10 +347,25 @@ class Che168Service:
         request_start_time = time.time()
         last_exception = None
 
+        # Get proxy configuration
+        proxies = self._get_proxy_config()
+
         for attempt in range(max_retries + 1):
             try:
-                logger.debug(f"Making proxy request (attempt {attempt + 1}): {endpoint_path}")
-                response = self.session.get(proxy_url, timeout=(10, 30))
+                # Rotate headers on retry
+                if attempt > 0:
+                    self.use_mobile_headers = not self.use_mobile_headers
+                    headers = CHE168_MOBILE_HEADERS if self.use_mobile_headers else CHE168_DESKTOP_HEADERS
+                    self.session.headers.update(headers)
+
+                logger.debug(f"Making direct request (attempt {attempt + 1}): {endpoint_path}")
+
+                # Make request with proxy if available
+                response = self.session.get(
+                    url,
+                    proxies=proxies,
+                    timeout=(10, 30)
+                )
                 response.raise_for_status()
 
                 # Parse JSON response
@@ -249,8 +376,8 @@ class Che168Service:
                 if request_time > 5.0:
                     logger.warning(f"Slow request detected: {endpoint_path} took {request_time:.2f}s")
 
-                # Reset circuit breaker on success
-                self.circuit_breaker_failures = 0
+                # Record success
+                self._record_success(endpoint_type)
 
                 return json_data
 
@@ -260,11 +387,8 @@ class Che168Service:
 
                 logger.warning(f"Request attempt {attempt + 1}/{max_retries + 1} failed: {str(e)}")
 
-                # Update circuit breaker
-                self.circuit_breaker_failures += 1
-                if self.circuit_breaker_failures >= 10:
-                    self.circuit_breaker_cooldown_until = time.time() + 10
-                    logger.error(f"Circuit breaker OPENED - too many failures ({self.circuit_breaker_failures})")
+                # Record failure
+                self._record_failure(endpoint_type)
 
                 # Retry with exponential backoff
                 if attempt < max_retries:
@@ -272,6 +396,13 @@ class Che168Service:
                     logger.info(f"Retrying in {backoff_time:.1f}s...")
                     await asyncio.sleep(backoff_time)
                     continue
+
+                # All retries exhausted, try static fallback
+                if endpoint_type in ["brands", "search"]:
+                    fallback_data = await self._get_static_fallback(endpoint_type)
+                    if fallback_data:
+                        logger.info(f"Using static fallback after {max_retries + 1} failed attempts")
+                        return fallback_data
 
                 return {
                     "returncode": status_code or 1,
@@ -348,7 +479,8 @@ class Che168Service:
             json_data = await self._make_request(
                 CHE168_SEARCH_API,
                 "/api/v11/search",
-                params
+                params,
+                endpoint_type="search"
             )
             result = self.parser.parse_car_search_response(json_data)
 
@@ -394,7 +526,8 @@ class Che168Service:
             json_data = await self._make_request(
                 CHE168_SEARCH_API,
                 "/api/v2/getbrands",
-                params
+                params,
+                endpoint_type="brands"
             )
             result = self.parser.parse_brands_response(json_data)
 
@@ -442,7 +575,8 @@ class Che168Service:
             raw_response = await self._make_request(
                 CHE168_SEARCH_API,
                 "/api/v11/search",
-                params
+                params,
+                endpoint_type="search"
             )
 
             if raw_response.get("returncode") != 0:
@@ -519,7 +653,8 @@ class Che168Service:
             raw_response = await self._make_request(
                 CHE168_SEARCH_API,
                 "/api/v11/search",
-                params
+                params,
+                endpoint_type="search"
             )
 
             if raw_response.get("returncode") != 0:
@@ -721,7 +856,8 @@ class Che168Service:
             json_data = await self._make_request(
                 CHE168_DETAIL_API,
                 "/apic/v2/car/getcarinfo",
-                params
+                params,
+                endpoint_type="detail"
             )
 
             if json_data.get("returncode") == 0 and "result" in json_data:
@@ -764,7 +900,8 @@ class Che168Service:
             json_data = await self._make_request(
                 CHE168_DETAIL_API,
                 "/api/v1/car/getparamtypeitems",
-                params
+                params,
+                endpoint_type="detail"
             )
 
             if json_data.get("returncode") == 0 and "result" in json_data:
@@ -873,18 +1010,33 @@ class Che168Service:
 
     def get_session_info(self) -> Dict[str, Any]:
         """Get current session information including cache statistics"""
+        circuit_breaker_statuses = {
+            name: cb.get_status()
+            for name, cb in self.circuit_breakers.items()
+        }
+
         return {
-            "proxy_url": BRAVOMOTORS_PROXY_URL,
+            "api_mode": "direct",
+            "search_api": CHE168_SEARCH_API,
+            "detail_api": CHE168_DETAIL_API,
             "request_count": self.request_count,
             "last_request": self.last_request_time,
+            "proxy_enabled": self.proxy_client is not None,
+            "header_mode": "mobile" if self.use_mobile_headers else "desktop",
             "cache_stats": {
                 "size": len(self.cache),
                 "volume": self.cache.volume(),
             },
+            "circuit_breakers": circuit_breaker_statuses,
+            # Legacy fields for backward compatibility
             "circuit_breaker": {
                 "failures": self.circuit_breaker_failures,
-                "is_open": time.time() < self.circuit_breaker_cooldown_until,
-                "cooldown_remaining": max(0, int(self.circuit_breaker_cooldown_until - time.time()))
+                "is_open": any(cb.state == "open" for cb in self.circuit_breakers.values()),
+                "cooldown_remaining": 0
+            },
+            "static_fallback_available": {
+                "brands": (STATIC_CACHE_DIR / "brands.json").exists(),
+                "search": (STATIC_CACHE_DIR / "cars.json").exists(),
             }
         }
 
@@ -893,6 +1045,15 @@ class Che168Service:
         self.cache.clear()
         logger.info("Cache cleared")
 
+    def reset_circuit_breakers(self):
+        """Reset all circuit breakers to closed state"""
+        for name, cb in self.circuit_breakers.items():
+            cb.failures = 0
+            cb.state = "closed"
+            cb.last_failure = 0
+        self.circuit_breaker_failures = 0
+        logger.info("All circuit breakers reset")
+
     def update_cookies(self, new_cookies: Dict[str, str]):
-        """Update session cookies (not used with proxy, kept for compatibility)"""
+        """Update session cookies (kept for compatibility)"""
         pass

@@ -1046,30 +1046,34 @@ async def health_check():
                 "current_proxy": kr_proxy_info["name"] if kr_proxy_info else "None",
                 "current_location": kr_proxy_info["location"] if kr_proxy_info else "Direct",
                 "proxy_url": kr_proxy_info["proxy"] if kr_proxy_info else "None",
-                "used_by": ["bobaedream_bikes", "che168_chinese", "bravomotors_chinese"],
+                "used_by": ["bobaedream_bikes", "che168_chinese"],
             },
         },
         "services": {
             "encar_api": "✅ Active (cars) - direct api.encar.com via RU proxy",
             "bobaedream_bikes": "✅ Active (motorcycles) - KR proxy",
             "kbchachacha_korean": "✅ Active (korean cars) - RU proxy",
-            "bravomotors_chinese": "✅ Active (chinese cars via bravomotors) - KR proxy",
-            "che168_chinese": "🚀 OPTIMIZED (chinese cars via che168.com) - KR proxy + smart retry",
+            "che168_chinese": "🚀 DIRECT API (chinese cars via che168.com) - KR proxy + circuit breakers",
             "tks_customs": "🚀 OPTIMIZED (customs calculator) - direct connection + CAPTCHA caching",
             "parser_engine": "BeautifulSoup4 + lxml",
             "captcha_solver": "CapSolver API integration + background pre-solving",
         },
         "che168_optimizations": {
-            "failed_request_cache": che168_stats.get("failed_request_cache", {}),
-            "circuit_breaker": che168_stats.get("circuit_breaker", {}),
+            "api_mode": che168_stats.get("api_mode", "direct"),
+            "search_api": che168_stats.get("search_api", ""),
+            "detail_api": che168_stats.get("detail_api", ""),
+            "circuit_breakers": che168_stats.get("circuit_breakers", {}),
             "request_count": che168_stats.get("request_count", 0),
+            "header_mode": che168_stats.get("header_mode", "mobile"),
+            "static_fallback": che168_stats.get("static_fallback_available", {}),
             "features": [
-                "Smart retry logic (only retriable errors)",
-                "Failed request caching (5min TTL)",
-                "Circuit breaker (10 failures/min threshold)",
-                "Async sleep (non-blocking)",
-                "Parallel API fetching",
-                "Proper HTTP status codes"
+                "Direct Che168 API access (no BravoMotors proxy)",
+                "Mobile headers for better access",
+                "Per-endpoint circuit breakers",
+                "Static file fallback for brands/search",
+                "Extended cache TTLs (24h brands, 12h models)",
+                "Header rotation on retry",
+                "Parallel API fetching"
             ]
         },
     }
@@ -3541,6 +3545,71 @@ async def get_che168_car_analysis(info_id: int):
     except Exception as e:
         logger.error(f"Error in che168 car analysis endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Car analysis retrieval failed: {str(e)}")
+
+
+@app.post("/api/che168/reset-circuit-breakers")
+async def reset_che168_circuit_breakers():
+    """
+    Reset Che168 circuit breakers - administrative endpoint
+
+    Use this endpoint to manually reset circuit breakers when they've been
+    triggered due to temporary API issues that have been resolved.
+
+    **Example Request:**
+    ```
+    POST /api/che168/reset-circuit-breakers
+    ```
+
+    **Response Format:**
+    ```json
+    {
+      "status": "success",
+      "message": "All circuit breakers have been reset",
+      "circuit_breakers": {
+        "search": {"state": "closed", "failures": 0},
+        "brands": {"state": "closed", "failures": 0},
+        "detail": {"state": "closed", "failures": 0}
+      }
+    }
+    ```
+    """
+    try:
+        che168_service.reset_circuit_breakers()
+        session_info = che168_service.get_session_info()
+        return {
+            "status": "success",
+            "message": "All circuit breakers have been reset",
+            "circuit_breakers": session_info.get("circuit_breakers", {}),
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error resetting circuit breakers: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to reset circuit breakers: {str(e)}")
+
+
+@app.post("/api/che168/clear-cache")
+async def clear_che168_cache():
+    """
+    Clear Che168 cache - administrative endpoint
+
+    Use this endpoint to manually clear all cached Che168 data when you need
+    fresh data from the API.
+
+    **Example Request:**
+    ```
+    POST /api/che168/clear-cache
+    ```
+    """
+    try:
+        che168_service.clear_cache()
+        return {
+            "status": "success",
+            "message": "Che168 cache cleared successfully",
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error clearing Che168 cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}")
 
 
 # =============================================================================
