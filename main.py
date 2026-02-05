@@ -3612,6 +3612,83 @@ async def clear_che168_cache():
         raise HTTPException(status_code=500, detail=f"Failed to clear cache: {str(e)}")
 
 
+@app.post("/api/che168/reset-session")
+async def reset_che168_session():
+    """
+    Reset Che168 session and signature error state - administrative endpoint
+
+    Use this endpoint when experiencing signature errors (签名错误) to force
+    session re-bootstrap and clear the signature error counter.
+
+    **Example Request:**
+    ```
+    POST /api/che168/reset-session
+    ```
+
+    **Response Format:**
+    ```json
+    {
+      "status": "success",
+      "message": "Session state reset - will re-bootstrap on next request",
+      "session_bootstrap": {
+        "initialized": false,
+        "valid": false,
+        "signature_errors": 0,
+        "using_static_fallback": false
+      }
+    }
+    ```
+    """
+    try:
+        che168_service.reset_session()
+        session_info = che168_service.get_session_info()
+        return {
+            "status": "success",
+            "message": "Session state reset - will re-bootstrap on next request",
+            "session_bootstrap": session_info.get("session_bootstrap", {}),
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error resetting Che168 session: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to reset session: {str(e)}")
+
+
+@app.post("/api/che168/reset-all")
+async def reset_all_che168_state():
+    """
+    Reset all Che168 state - comprehensive administrative endpoint
+
+    Resets circuit breakers, session state, signature error counter, and clears cache.
+    Use this endpoint for a complete service reset.
+
+    **Example Request:**
+    ```
+    POST /api/che168/reset-all
+    ```
+
+    **Response Format:**
+    ```json
+    {
+      "status": "success",
+      "message": "All Che168 service state has been reset",
+      "session_info": {...}
+    }
+    ```
+    """
+    try:
+        che168_service.reset_all()
+        session_info = che168_service.get_session_info()
+        return {
+            "status": "success",
+            "message": "All Che168 service state has been reset",
+            "session_info": session_info,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error resetting all Che168 state: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to reset all state: {str(e)}")
+
+
 # =============================================================================
 # VLB CUSTOMS CALCULATION ENDPOINTS
 # =============================================================================

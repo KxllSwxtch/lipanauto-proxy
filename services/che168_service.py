@@ -1216,11 +1216,17 @@ class Che168Service:
         )
 
     def get_session_info(self) -> Dict[str, Any]:
-        """Get current session information including cache statistics"""
+        """Get current session information including cache statistics and session bootstrap state"""
         circuit_breaker_statuses = {
             name: cb.get_status()
             for name, cb in self.circuit_breakers.items()
         }
+
+        # Calculate session time remaining
+        session_time_remaining = 0
+        if self._session_initialized:
+            elapsed = time.time() - self._last_session_time
+            session_time_remaining = max(0, int(self._session_ttl - elapsed))
 
         return {
             "api_mode": "direct",
@@ -1233,6 +1239,15 @@ class Che168Service:
             "cache_stats": {
                 "size": len(self.cache),
                 "volume": self.cache.volume(),
+            },
+            "session_bootstrap": {
+                "initialized": self._session_initialized,
+                "valid": self._is_session_valid(),
+                "time_remaining_seconds": session_time_remaining,
+                "device_id": self._device_id[:8] + "...",  # Partial for privacy
+                "cookies_count": len(self._session_cookies) if self._session_cookies else 0,
+                "signature_errors": self._signature_error_count,
+                "using_static_fallback": self._signature_error_count >= self._max_signature_errors,
             },
             "circuit_breakers": circuit_breaker_statuses,
             # Legacy fields for backward compatibility
@@ -1261,6 +1276,26 @@ class Che168Service:
         self.circuit_breaker_failures = 0
         logger.info("All circuit breakers reset")
 
+    def reset_session(self):
+        """Reset session state to force re-bootstrap"""
+        self._session_initialized = False
+        self._session_cookies = None
+        self._last_session_time = 0
+        self._signature_error_count = 0
+        logger.info("Session state reset - will re-bootstrap on next request")
+
+    def reset_all(self):
+        """Reset all state: circuit breakers, session, and signature errors"""
+        self.reset_circuit_breakers()
+        self.reset_session()
+        self.clear_cache()
+        logger.info("All service state reset")
+
     def update_cookies(self, new_cookies: Dict[str, str]):
         """Update session cookies (kept for compatibility)"""
-        pass
+        if new_cookies:
+            self.session.cookies.update(new_cookies)
+            self._session_cookies = new_cookies
+            self._session_initialized = True
+            self._last_session_time = time.time()
+            logger.info(f"Session cookies updated: {list(new_cookies.keys())}")
