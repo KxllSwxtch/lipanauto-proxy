@@ -11,18 +11,14 @@ The pan-auto.ru API provides:
 import asyncio
 import logging
 import random
-import time
-from datetime import datetime, timedelta
-from typing import Dict, Optional, Any
-import requests
-from dataclasses import dataclass
 import threading
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
-from schemas.customs_russia import (
-    PanAutoCarData,
-    PanAutoCarResponse,
-    PanAutoCostsRUB
-)
+import requests
+from schemas.customs_russia import PanAutoCarData, PanAutoCarResponse, PanAutoCostsRUB
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +50,14 @@ class PanAutoService:
     """
 
     BASE_URL = "https://zefir.pan-auto.ru"
-    API_ENDPOINT = "/api/cars/{car_id}/"
+    API_ENDPOINT = "/api/korea/{car_id}/"
 
     # User-Agent pool for rotation
     USER_AGENTS = [
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:129.0) Gecko/20100101 Firefox/129.0',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:129.0) Gecko/20100101 Firefox/129.0",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
     ]
 
     def __init__(self):
@@ -77,12 +73,12 @@ class PanAutoService:
 
         # Performance tracking
         self.stats = {
-            'cache_hits': 0,
-            'cache_misses': 0,
-            'api_calls_made': 0,
-            'api_failures': 0,
-            'cars_with_hp': 0,
-            'cars_without_hp': 0
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "api_calls_made": 0,
+            "api_failures": 0,
+            "cars_with_hp": 0,
+            "cars_without_hp": 0,
         }
 
         self._setup_session()
@@ -93,18 +89,18 @@ class PanAutoService:
         user_agent = self.USER_AGENTS[self.current_user_agent_index]
 
         headers = {
-            'Accept': '*/*',
-            'Accept-Language': 'en,ru;q=0.9,en-CA;q=0.8,la;q=0.7,fr;q=0.6,ko;q=0.5',
-            'Connection': 'keep-alive',
-            'Origin': 'https://pan-auto.ru',
-            'Referer': 'https://pan-auto.ru/',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-site',
-            'User-Agent': user_agent,
-            'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"macOS"'
+            "Accept": "*/*",
+            "Accept-Language": "en,ru;q=0.9,en-CA;q=0.8,la;q=0.7,fr;q=0.6,ko;q=0.5",
+            "Connection": "keep-alive",
+            "Origin": "https://pan-auto.ru",
+            "Referer": "https://pan-auto.ru/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "User-Agent": user_agent,
+            "sec-ch-ua": '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"macOS"',
         }
 
         self.session.headers.update(headers)
@@ -112,12 +108,12 @@ class PanAutoService:
     def _rotate_user_agent(self):
         """Rotate User-Agent for next request"""
 
-        self.current_user_agent_index = (
-            self.current_user_agent_index + 1
-        ) % len(self.USER_AGENTS)
+        self.current_user_agent_index = (self.current_user_agent_index + 1) % len(
+            self.USER_AGENTS
+        )
 
         user_agent = self.USER_AGENTS[self.current_user_agent_index]
-        self.session.headers['User-Agent'] = user_agent
+        self.session.headers["User-Agent"] = user_agent
 
     def _get_cache_key(self, car_id: str) -> str:
         """Generate cache key for car ID"""
@@ -131,14 +127,14 @@ class PanAutoService:
         with self.cache_lock:
             cached = self.cache.get(cache_key)
             if cached and not cached.is_expired:
-                self.stats['cache_hits'] += 1
+                self.stats["cache_hits"] += 1
                 logger.info(f"Cache hit for car {car_id}")
                 return cached.response
             elif cached:
                 # Remove expired cache entry
                 del self.cache[cache_key]
 
-        self.stats['cache_misses'] += 1
+        self.stats["cache_misses"] += 1
         return None
 
     def _cache_result(self, car_id: str, response: PanAutoCarResponse):
@@ -148,11 +144,12 @@ class PanAutoService:
 
         with self.cache_lock:
             self.cache[cache_key] = CachedPanAutoResult(
-                response=response,
-                created_at=datetime.now()
+                response=response, created_at=datetime.now()
             )
 
-    async def get_car_data(self, car_id: str, force_refresh: bool = False) -> PanAutoCarResponse:
+    async def get_car_data(
+        self, car_id: str, force_refresh: bool = False
+    ) -> PanAutoCarResponse:
         """
         Fetch car data from pan-auto.ru API
 
@@ -180,14 +177,14 @@ class PanAutoService:
 
                 # Update stats
                 if result.has_hp:
-                    self.stats['cars_with_hp'] += 1
+                    self.stats["cars_with_hp"] += 1
                 else:
-                    self.stats['cars_without_hp'] += 1
+                    self.stats["cars_without_hp"] += 1
 
             return result
 
         except Exception as e:
-            self.stats['api_failures'] += 1
+            self.stats["api_failures"] += 1
             logger.error(f"Failed to fetch car data for {car_id}: {str(e)}")
 
             return PanAutoCarResponse(
@@ -195,7 +192,7 @@ class PanAutoService:
                 car_id=car_id,
                 has_hp=False,
                 has_customs=False,
-                error=f"Failed to fetch car data: {str(e)}"
+                error=f"Failed to fetch car data: {str(e)}",
             )
 
     async def _fetch_from_api(self, car_id: str) -> PanAutoCarResponse:
@@ -214,7 +211,7 @@ class PanAutoService:
 
         try:
             response = self.session.get(url, timeout=15)
-            self.stats['api_calls_made'] += 1
+            self.stats["api_calls_made"] += 1
 
             if response.status_code == 200:
                 data = response.json()
@@ -227,17 +224,19 @@ class PanAutoService:
                     car_id=car_id,
                     has_hp=False,
                     has_customs=False,
-                    error="Car not found on pan-auto.ru"
+                    error="Car not found on pan-auto.ru",
                 )
 
             else:
-                logger.warning(f"Pan-auto.ru API returned status {response.status_code}")
+                logger.warning(
+                    f"Pan-auto.ru API returned status {response.status_code}"
+                )
                 return PanAutoCarResponse(
                     success=False,
                     car_id=car_id,
                     has_hp=False,
                     has_customs=False,
-                    error=f"Pan-auto.ru API error: HTTP {response.status_code}"
+                    error=f"Pan-auto.ru API error: HTTP {response.status_code}",
                 )
 
         except requests.Timeout:
@@ -247,7 +246,7 @@ class PanAutoService:
                 car_id=car_id,
                 has_hp=False,
                 has_customs=False,
-                error="Request timeout"
+                error="Request timeout",
             )
 
         except requests.RequestException as e:
@@ -259,19 +258,19 @@ class PanAutoService:
 
         try:
             # Extract HP
-            hp = data.get('hp')
+            hp = data.get("hp")
             has_hp = hp is not None and isinstance(hp, (int, float)) and hp > 0
 
             # Extract costs
-            costs = data.get('costs', {})
-            costs_rub_data = costs.get('RUB', {})
+            costs = data.get("costs", {})
+            costs_rub_data = costs.get("RUB", {})
 
             # Check if we have valid customs data
             has_customs = (
-                costs_rub_data and
-                costs_rub_data.get('clearanceCost') is not None and
-                costs_rub_data.get('utilizationFee') is not None and
-                costs_rub_data.get('customsDuty') is not None
+                costs_rub_data
+                and costs_rub_data.get("clearanceCost") is not None
+                and costs_rub_data.get("utilizationFee") is not None
+                and costs_rub_data.get("customsDuty") is not None
             )
 
             # Parse costs to Pydantic model
@@ -279,17 +278,19 @@ class PanAutoService:
             if has_customs:
                 try:
                     costs_rub = PanAutoCostsRUB(
-                        carPriceEncar=costs_rub_data.get('carPriceEncar', 0),
-                        carPrice=costs_rub_data.get('carPrice', 0),
-                        clearanceCost=costs_rub_data.get('clearanceCost', 0),
-                        utilizationFee=costs_rub_data.get('utilizationFee', 0),
-                        customsDuty=costs_rub_data.get('customsDuty', 0),
-                        deliveryRate=costs_rub_data.get('deliveryRate'),
-                        deliveryCost=costs_rub_data.get('deliveryCost', 0),
-                        vladivostokServices=costs_rub_data.get('vladivostokServices', 0),
-                        totalFees=costs_rub_data.get('totalFees', 0),
-                        finalCost=costs_rub_data.get('finalCost', 0),
-                        dealerCost=costs_rub_data.get('dealerCost', 0)
+                        carPriceEncar=costs_rub_data.get("carPriceEncar", 0),
+                        carPrice=costs_rub_data.get("carPrice", 0),
+                        clearanceCost=costs_rub_data.get("clearanceCost", 0),
+                        utilizationFee=costs_rub_data.get("utilizationFee", 0),
+                        customsDuty=costs_rub_data.get("customsDuty", 0),
+                        deliveryRate=costs_rub_data.get("deliveryRate"),
+                        deliveryCost=costs_rub_data.get("deliveryCost", 0),
+                        vladivostokServices=costs_rub_data.get(
+                            "vladivostokServices", 0
+                        ),
+                        totalFees=costs_rub_data.get("totalFees", 0),
+                        finalCost=costs_rub_data.get("finalCost", 0),
+                        dealerCost=costs_rub_data.get("dealerCost", 0),
                     )
                 except Exception as e:
                     logger.warning(f"Failed to parse costs for car {car_id}: {e}")
@@ -297,30 +298,32 @@ class PanAutoService:
                     costs_rub = None
 
             # Extract other fields
-            manufacturer_data = data.get('manufacturer', {})
-            model_data = data.get('model', {})
+            manufacturer_data = data.get("manufacturer", {})
+            model_data = data.get("model", {})
 
             response = PanAutoCarResponse(
                 success=True,
                 car_id=car_id,
                 hp=int(hp) if has_hp else None,
-                displacement=data.get('displacement'),
-                year=data.get('year'),
-                form_year=data.get('formYear'),
-                fuel_type=data.get('fuelType'),
-                mileage=data.get('mileage'),
+                displacement=data.get("displacement"),
+                year=data.get("year"),
+                form_year=data.get("formYear"),
+                fuel_type=data.get("fuelType"),
+                mileage=data.get("mileage"),
                 costs_rub=costs_rub,
-                manufacturer=manufacturer_data.get('name') if manufacturer_data else None,
-                model=model_data.get('name') if model_data else None,
-                badge=data.get('badge'),
-                vin=data.get('vin'),
+                manufacturer=manufacturer_data.get("name")
+                if manufacturer_data
+                else None,
+                model=model_data.get("name") if model_data else None,
+                badge=data.get("badge"),
+                vin=data.get("vin"),
                 has_hp=has_hp,
                 has_customs=has_customs,
                 meta={
-                    'source': 'pan-auto.ru',
-                    'fetched_at': datetime.now().isoformat(),
-                    'original_id': data.get('id')
-                }
+                    "source": "pan-auto.ru",
+                    "fetched_at": datetime.now().isoformat(),
+                    "original_id": data.get("id"),
+                },
             )
 
             logger.info(
@@ -331,13 +334,15 @@ class PanAutoService:
             return response
 
         except Exception as e:
-            logger.error(f"Error parsing pan-auto.ru response for car {car_id}: {str(e)}")
+            logger.error(
+                f"Error parsing pan-auto.ru response for car {car_id}: {str(e)}"
+            )
             return PanAutoCarResponse(
                 success=False,
                 car_id=car_id,
                 has_hp=False,
                 has_customs=False,
-                error=f"Failed to parse response: {str(e)}"
+                error=f"Failed to parse response: {str(e)}",
             )
 
     def get_service_stats(self) -> Dict[str, Any]:
@@ -345,8 +350,9 @@ class PanAutoService:
 
         return {
             **self.stats,
-            'cache_size': len(self.cache),
-            'current_user_agent': self.session.headers.get('User-Agent', 'Unknown')[:50] + '...'
+            "cache_size": len(self.cache),
+            "current_user_agent": self.session.headers.get("User-Agent", "Unknown")[:50]
+            + "...",
         }
 
     def clear_cache(self):
@@ -361,15 +367,16 @@ class PanAutoService:
 
         with self.cache_lock:
             expired_keys = [
-                key for key, cached in self.cache.items()
-                if cached.is_expired
+                key for key, cached in self.cache.items() if cached.is_expired
             ]
 
             for key in expired_keys:
                 del self.cache[key]
 
             if expired_keys:
-                logger.info(f"Removed {len(expired_keys)} expired pan-auto.ru cache entries")
+                logger.info(
+                    f"Removed {len(expired_keys)} expired pan-auto.ru cache entries"
+                )
 
 
 # Singleton instance

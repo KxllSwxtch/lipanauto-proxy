@@ -1,86 +1,87 @@
-import os
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 import asyncio
+import logging
+import os
 import random
-import time
 import re
+import time
+import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Union, Annotated
-from fastapi import FastAPI, Query, HTTPException, Path
+from typing import Annotated, Dict, List, Optional, Union
+
+import requests
+from fastapi import FastAPI, HTTPException, Path, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import logging
-import uuid
 from pydantic import ValidationError
+from requests.adapters import HTTPAdapter
+from schemas.bike_filters import (
+    BikeSearchFilters,
+    FilterInfo,
+    FilterLevel,
+    FilterSearchParams,
+)
 
 # New imports for bike functionality
-from schemas.bikes import BikeSearchParams, BikeSearchResponse, BikeDetailResponse
-from schemas.bike_filters import (
-    FilterLevel,
-    FilterInfo,
-    FilterSearchParams,
-    BikeSearchFilters,
+from schemas.bikes import BikeDetailResponse, BikeSearchParams, BikeSearchResponse
+
+# BravoMotors imports (deprecated - replaced by che168)
+from schemas.bravomotors import (
+    BravoMotorsCarDetailResponse,
+    BravoMotorsFiltersResponse,
+    BravoMotorsSearchFilters,
+    BravoMotorsSearchResponse,
+    Che168BrandsResponse,
+    Che168FiltersResponse,
+    Che168SearchFilters,
+    # Che168 schemas (search, filters, brands)
+    Che168SearchResponse,
+    TranslationRequest,
+    TranslationResponse,
 )
-from services.bike_service import BikeService
+from schemas.che168 import (
+    Che168CarAnalysisResponse,
+    # Car detail API schemas
+    Che168CarDetailResponse,  # Use the one from che168 with car/error/meta fields
+    Che168CarInfoResponse,
+    Che168CarParamsResponse,
+)
 
 # Customs calculator imports (TKS - removed, replaced with VLB)
 from schemas.customs import CustomsCalculationRequest, CustomsCalculationResponse
-
-# VLB Customs imports
-from schemas.vlb_customs import (
-    VLBCustomsRequest,
-    VLBCustomsResponse,
-    TurnkeyPriceResponse,
-    BikeCustomsRequest
-)
-from services.vlb_customs_service import VLBCustomsService
 
 # Encar inspection imports
 from schemas.inspection import InspectionDataResponse
 
 # KBChaChaCha imports
 from schemas.kbchachacha import (
+    KBCarCondition,
+    KBCarDetailResponse,
+    KBCarOptions,
+    KBCarPricing,
+    KBCarSpecification,
+    KBConfigsTrimsResponse,
+    KBDefaultListResponse,
+    KBGenerationsResponse,
     KBMakersResponse,
     KBModelsResponse,
-    KBGenerationsResponse,
-    KBConfigsTrimsResponse,
-    KBSearchResponse,
-    KBDefaultListResponse,
     KBSearchFilters,
-    KBCarDetailResponse,
-    KBCarSpecification,
-    KBCarPricing,
-    KBCarCondition,
-    KBCarOptions,
+    KBSearchResponse,
     KBSellerInfo,
 )
-from services.kbchachacha_service import KBChaChaService
 
-# BravoMotors imports (deprecated - replaced by che168)
-from schemas.bravomotors import (
-    BravoMotorsSearchResponse,
-    BravoMotorsCarDetailResponse,
-    BravoMotorsFiltersResponse,
-    BravoMotorsSearchFilters,
-    TranslationRequest,
-    TranslationResponse,
-    # Che168 schemas (search, filters, brands)
-    Che168SearchResponse,
-    Che168FiltersResponse,
-    Che168SearchFilters,
-    Che168BrandsResponse,
+# VLB Customs imports
+from schemas.vlb_customs import (
+    BikeCustomsRequest,
+    TurnkeyPriceResponse,
+    VLBCustomsRequest,
+    VLBCustomsResponse,
 )
-from schemas.che168 import (
-    # Car detail API schemas
-    Che168CarDetailResponse,  # Use the one from che168 with car/error/meta fields
-    Che168CarInfoResponse,
-    Che168CarParamsResponse,
-    Che168CarAnalysisResponse,
-)
+from services.bike_service import BikeService
 from services.bravomotors_service import BravoMotorsService
 from services.che168_service import Che168Service
+from services.kbchachacha_service import KBChaChaService
+from services.vlb_customs_service import VLBCustomsService
+from urllib3.util.retry import Retry
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -103,7 +104,9 @@ OXYLABS_RU_PROXY = os.getenv("OXYLABS_RU_PROXY", "ru-pr.oxylabs.io:40000")
 # Korean proxy - for bikes and Chinese cars (port 40000)
 OXYLABS_KR_PROXY = os.getenv("OXYLABS_KR_PROXY", "kr-pr.oxylabs.io:40000")
 # Shared auth credentials
-OXYLABS_AUTH = os.getenv("OXYLABS_AUTH", "customer-kingmotors_backup_NoKZD:b32D=xjQ=57ol6~F")
+OXYLABS_AUTH = os.getenv(
+    "OXYLABS_AUTH", "customer-kingmotors_backup_NoKZD:b32D=xjQ=57ol6~F"
+)
 
 # Legacy PROXY_CONFIGS for backward compatibility (uses RU proxy)
 PROXY_CONFIGS = [
@@ -190,7 +193,9 @@ class EncarProxyClient:
         self.request_count = 0
         self.last_request_time = 0
         self.session_rotation_count = 0
-        self.proxy_configs = proxy_configs if proxy_configs is not None else PROXY_CONFIGS
+        self.proxy_configs = (
+            proxy_configs if proxy_configs is not None else PROXY_CONFIGS
+        )
         self.client_name = name
 
         # Базовая конфигурация сессии
@@ -202,14 +207,22 @@ class EncarProxyClient:
             total=3,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+            allowed_methods=[
+                "HEAD",
+                "GET",
+                "POST",
+                "PUT",
+                "DELETE",
+                "OPTIONS",
+                "TRACE",
+            ],
         )
 
         adapter = HTTPAdapter(
             pool_connections=20,
             pool_maxsize=100,
             max_retries=retry_strategy,
-            pool_block=False
+            pool_block=False,
         )
 
         # Mount adapter for both HTTP and HTTPS
@@ -264,7 +277,9 @@ class EncarProxyClient:
     def _rotate_proxy(self):
         """Ротация residential прокси"""
         if self.proxy_configs:
-            proxy_info = self.proxy_configs[self.current_proxy_index % len(self.proxy_configs)]
+            proxy_info = self.proxy_configs[
+                self.current_proxy_index % len(self.proxy_configs)
+            ]
             proxy_config = get_proxy_config(proxy_info)
             self.session.proxies = proxy_config
             self.current_proxy_index += 1
@@ -290,14 +305,22 @@ class EncarProxyClient:
             total=3,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+            allowed_methods=[
+                "HEAD",
+                "GET",
+                "POST",
+                "PUT",
+                "DELETE",
+                "OPTIONS",
+                "TRACE",
+            ],
         )
 
         adapter = HTTPAdapter(
             pool_connections=20,
             pool_maxsize=100,
             max_retries=retry_strategy,
-            pool_block=False
+            pool_block=False,
         )
 
         # Mount adapter for both HTTP and HTTPS
@@ -339,8 +362,12 @@ class EncarProxyClient:
                 # Получаем свежие заголовки
                 headers = self._get_dynamic_headers()
 
-                logger.info(f"[{self.client_name}] Attempt {attempt + 1}/{max_retries}: {url}")
-                logger.info(f"[{self.client_name}] Using UA: {headers['user-agent'][:50]}...")
+                logger.info(
+                    f"[{self.client_name}] Attempt {attempt + 1}/{max_retries}: {url}"
+                )
+                logger.info(
+                    f"[{self.client_name}] Using UA: {headers['user-agent'][:50]}..."
+                )
 
                 # Выполняем запрос в отдельном потоке
                 loop = asyncio.get_event_loop()
@@ -348,7 +375,9 @@ class EncarProxyClient:
                     None, lambda: self.session.get(url, headers=headers)
                 )
 
-                logger.info(f"[{self.client_name}] Response status: {response.status_code}")
+                logger.info(
+                    f"[{self.client_name}] Response status: {response.status_code}"
+                )
 
                 if response.status_code == 200:
                     return {
@@ -360,18 +389,24 @@ class EncarProxyClient:
                         "attempt": attempt + 1,
                     }
                 elif response.status_code == 401:
-                    logger.warning(f"[{self.client_name}] 401 Unauthorized - rotating proxy and retrying")
+                    logger.warning(
+                        f"[{self.client_name}] 401 Unauthorized - rotating proxy and retrying"
+                    )
                     self._rotate_proxy()
                     await asyncio.sleep(1)
                     continue
                 elif response.status_code == 403:
-                    logger.warning(f"[{self.client_name}] IP blacklisted (403) - creating new session")
+                    logger.warning(
+                        f"[{self.client_name}] IP blacklisted (403) - creating new session"
+                    )
                     self._create_new_session()
                     # Дополнительная пауза при блокировке IP
                     await asyncio.sleep(3 + random.uniform(0, 2))
                     continue
                 elif response.status_code == 407:
-                    logger.warning(f"[{self.client_name}] Proxy authentication failed - rotating proxy")
+                    logger.warning(
+                        f"[{self.client_name}] Proxy authentication failed - rotating proxy"
+                    )
                     self._rotate_proxy()
                     continue
                 elif response.status_code in [429, 503]:
@@ -606,7 +641,7 @@ async def proxy_nav(
 
 @app.get("/api/encar/inspection/{vehicle_id}", response_model=InspectionDataResponse)
 async def get_inspection_data(
-    vehicle_id: str = Path(..., description="Encar vehicle ID")
+    vehicle_id: str = Path(..., description="Encar vehicle ID"),
 ):
     """
     Get vehicle inspection data from Encar API with proxy protection
@@ -649,16 +684,17 @@ async def get_inspection_data(
             if response_data.get("status_code") == 404:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Inspection data not found for vehicle ID: {vehicle_id}"
+                    detail=f"Inspection data not found for vehicle ID: {vehicle_id}",
                 )
             else:
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Failed to fetch inspection data: {error_msg}"
+                    detail=f"Failed to fetch inspection data: {error_msg}",
                 )
 
         # Parse JSON response
         import json
+
         try:
             inspection_data = json.loads(response_data["text"])
             logger.info(f"✅ Successfully parsed JSON for vehicle ID: {vehicle_id}")
@@ -666,35 +702,37 @@ async def get_inspection_data(
             # Validate response data against schema before returning
             try:
                 validated_data = InspectionDataResponse(**inspection_data)
-                logger.info(f"✅ Successfully validated inspection data for vehicle ID: {vehicle_id}")
+                logger.info(
+                    f"✅ Successfully validated inspection data for vehicle ID: {vehicle_id}"
+                )
                 return validated_data
             except ValidationError as ve:
                 # Log detailed validation error with raw response for debugging
-                logger.error(f"❌ Schema validation failed for vehicle ID: {vehicle_id}")
+                logger.error(
+                    f"❌ Schema validation failed for vehicle ID: {vehicle_id}"
+                )
                 logger.error(f"Validation errors: {ve.errors()}")
-                logger.error(f"Raw response data: {json.dumps(inspection_data, indent=2, ensure_ascii=False)[:2000]}")
+                logger.error(
+                    f"Raw response data: {json.dumps(inspection_data, indent=2, ensure_ascii=False)[:2000]}"
+                )
 
                 raise HTTPException(
                     status_code=502,
-                    detail=f"Encar API returned incomplete or invalid inspection data. Missing or invalid fields: {[err['loc'] for err in ve.errors()]}"
+                    detail=f"Encar API returned incomplete or invalid inspection data. Missing or invalid fields: {[err['loc'] for err in ve.errors()]}",
                 )
 
         except json.JSONDecodeError as e:
             logger.error(f"❌ Failed to parse inspection data JSON: {str(e)}")
             logger.error(f"Raw response text: {response_data['text'][:500]}")
             raise HTTPException(
-                status_code=502,
-                detail=f"Failed to parse inspection data: {str(e)}"
+                status_code=502, detail=f"Failed to parse inspection data: {str(e)}"
             )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"❌ Unexpected error fetching inspection data: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/api/bikes", response_model=BikeSearchResponse)
@@ -1035,7 +1073,9 @@ async def health_check():
                 "request_count": proxy_client.request_count,
                 "session_rotations": proxy_client.session_rotation_count,
                 "current_proxy": ru_proxy_info["name"] if ru_proxy_info else "None",
-                "current_location": ru_proxy_info["location"] if ru_proxy_info else "Direct",
+                "current_location": ru_proxy_info["location"]
+                if ru_proxy_info
+                else "Direct",
                 "proxy_url": ru_proxy_info["proxy"] if ru_proxy_info else "None",
                 "used_by": ["encar_api", "kbchachacha"],
             },
@@ -1044,7 +1084,9 @@ async def health_check():
                 "request_count": kr_proxy_client.request_count,
                 "session_rotations": kr_proxy_client.session_rotation_count,
                 "current_proxy": kr_proxy_info["name"] if kr_proxy_info else "None",
-                "current_location": kr_proxy_info["location"] if kr_proxy_info else "Direct",
+                "current_location": kr_proxy_info["location"]
+                if kr_proxy_info
+                else "Direct",
                 "proxy_url": kr_proxy_info["proxy"] if kr_proxy_info else "None",
                 "used_by": ["bobaedream_bikes", "che168_chinese"],
             },
@@ -1073,8 +1115,8 @@ async def health_check():
                 "Static file fallback for brands/search",
                 "Extended cache TTLs (24h brands, 12h models)",
                 "Header rotation on retry",
-                "Parallel API fetching"
-            ]
+                "Parallel API fetching",
+            ],
         },
     }
 
@@ -1448,9 +1490,9 @@ async def test_customs_calculation_production():
     This endpoint provides detailed diagnostics for cloud deployment issues
     """
     try:
+        import os
         import platform
         import sys
-        import os
 
         # Environment diagnostics
         env_info = {
@@ -1643,16 +1685,16 @@ async def get_customs_debug_info():
 # ============================================================================
 
 from schemas.kazakhstan import (
+    CNYRatesData,
+    CNYRatesResponse,
+    ExchangeRatesResponse,
     KZCalculationRequest,
     KZCalculationResponse,
-    ExchangeRatesResponse,
     KZPriceLookupRequest,
     KZPriceLookupResponse,
-    CNYRatesResponse,
-    CNYRatesData,
 )
-from services.kazakhstan_customs_service import kazakhstan_customs_service
 from services.exchange_rate_service import exchange_rate_service
+from services.kazakhstan_customs_service import kazakhstan_customs_service
 from services.kz_price_table_service import kz_price_table_service
 
 
@@ -1663,17 +1705,21 @@ async def validate_services():
     warnings = []
 
     if not kz_price_table_service.is_loaded:
-        warnings.append("⚠️  KZ price table not loaded - Kazakhstan calculations will fail")
+        warnings.append(
+            "⚠️  KZ price table not loaded - Kazakhstan calculations will fail"
+        )
 
     if exchange_rate_service.service is None:
-        warnings.append("⚠️  Google Sheets API not configured - using fallback exchange rates")
+        warnings.append(
+            "⚠️  Google Sheets API not configured - using fallback exchange rates"
+        )
 
     if warnings:
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("SERVICE INITIALIZATION WARNINGS:")
         for warning in warnings:
             print(f"  {warning}")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
     else:
         print("✅ All services initialized successfully")
 
@@ -1885,12 +1931,12 @@ async def calculate_kazakhstan_customs(request: KZCalculationRequest):
 # ============================================================================
 
 from schemas.customs_russia import (
-    PanAutoCarResponse,
     CalcusCalculationRequest,
     CalcusCalculationResponse,
+    PanAutoCarResponse,
 )
-from services.panauto_service import get_panauto_service
 from services.calcus_service import get_calcus_service
+from services.panauto_service import get_panauto_service
 
 # Initialize services
 panauto_service = get_panauto_service()
@@ -1902,7 +1948,7 @@ async def get_panauto_car_data(car_id: str):
     """
     Get car data from pan-auto.ru including HP and pre-calculated customs
 
-    This endpoint fetches car data from pan-auto.ru (zefir.pan-auto.ru/api/cars/{car_id}/)
+    This endpoint fetches car data from pan-auto.ru (zefir.pan-auto.ru/api/korea/{car_id}/)
     which includes:
     - HP (horsepower) value needed for 2026 customs calculations
     - Pre-calculated customs duties (clearanceCost, utilizationFee, customsDuty)
@@ -2451,7 +2497,7 @@ async def test_kbchachacha_integration():
             logger.info(f"Testing KBChaChaCha filtered search for 현대...")
 
             # Test comprehensive filters
-            from schemas.kbchachacha import KBSearchFilters, FuelType
+            from schemas.kbchachacha import FuelType, KBSearchFilters
 
             test_filters = KBSearchFilters(
                 page=1,
@@ -2674,11 +2720,11 @@ async def get_kbchachacha_car_details(car_seq: str):
 
         # Import schema classes for response validation
         from schemas.kbchachacha import (
-            KBCarDetailResponse,
-            KBCarSpecification,
-            KBCarPricing,
             KBCarCondition,
+            KBCarDetailResponse,
             KBCarOptions,
+            KBCarPricing,
+            KBCarSpecification,
             KBSellerInfo,
         )
 
@@ -2720,7 +2766,9 @@ async def get_kbchachacha_car_details(car_seq: str):
 async def get_bravomotors_cars(
     page: int = Query(default=1, description="Page number"),
     page_size: int = Query(default=20, description="Page size (max 50)", le=50),
-    translate: bool = Query(default=True, description="Auto-translate Chinese content to Russian"),
+    translate: bool = Query(
+        default=True, description="Auto-translate Chinese content to Russian"
+    ),
 ):
     """
     Get car listings from BravoMotors Chinese marketplace
@@ -2825,7 +2873,9 @@ async def search_bravomotors_cars(filters: BravoMotorsSearchFilters):
 @app.get("/api/bravomotors/car/{car_id}", response_model=BravoMotorsCarDetailResponse)
 async def get_bravomotors_car_detail(
     car_id: str = Path(..., description="Car ID"),
-    translate: bool = Query(default=True, description="Auto-translate Chinese content to Russian")
+    translate: bool = Query(
+        default=True, description="Auto-translate Chinese content to Russian"
+    ),
 ):
     """
     Get detailed information for a specific BravoMotors car
@@ -2945,8 +2995,12 @@ async def test_bravomotors_integration():
             "bravomotors_api": {
                 "success": result.success,
                 "total_cars": result.total_count if result.success else 0,
-                "sample_car": result.cars[0].title if result.success and result.cars else None,
-                "sample_car_translated": result.cars[0].title_translated if result.success and result.cars else None,
+                "sample_car": result.cars[0].title
+                if result.success and result.cars
+                else None,
+                "sample_car_translated": result.cars[0].title_translated
+                if result.success and result.cars
+                else None,
                 "error": result.meta.get("error") if not result.success else None,
             },
             "translation_service": {
@@ -2956,7 +3010,9 @@ async def test_bravomotors_integration():
             },
             "proxy_status": {
                 "enabled": bravomotors_service.proxy_client is not None,
-                "proxy_name": "Decodo Proxy (Korean)" if bravomotors_service.proxy_client else "Direct",
+                "proxy_name": "Decodo Proxy (Korean)"
+                if bravomotors_service.proxy_client
+                else "Direct",
             },
             "service": "bravomotors_chinese_marketplace",
             "version": "1.0.0",
@@ -3181,25 +3237,24 @@ async def get_che168_car_detail(info_id: int):
                 # Car not found - return 404
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Car listing {info_id} not found - may be sold or delisted"
+                    detail=f"Car listing {info_id} not found - may be sold or delisted",
                 )
             elif "unavailable" in error_msg.lower() or "circuit" in error_msg.lower():
                 # Service unavailable (circuit breaker open)
                 raise HTTPException(
                     status_code=503,
-                    detail="Che168 service temporarily unavailable - please try again later"
+                    detail="Che168 service temporarily unavailable - please try again later",
                 )
             elif "514" in error_msg or "Frequency Capped" in error_msg:
                 # Rate limiting error
                 raise HTTPException(
                     status_code=429,
-                    detail="Too many requests to Che168 - please try again in a moment"
+                    detail="Too many requests to Che168 - please try again in a moment",
                 )
             else:
                 # Other errors - return 500
                 raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to fetch car details: {error_msg}"
+                    status_code=500, detail=f"Failed to fetch car details: {error_msg}"
                 )
 
     except HTTPException:
@@ -3275,7 +3330,9 @@ async def get_che168_models(brand_id: int):
         raise HTTPException(status_code=500, detail=f"Models fetch failed: {str(e)}")
 
 
-@app.get("/api/che168/years/{brand_id}/{series_id}", response_model=Che168SearchResponse)
+@app.get(
+    "/api/che168/years/{brand_id}/{series_id}", response_model=Che168SearchResponse
+)
 async def get_che168_years(brand_id: int, series_id: int):
     """
     Get available years for a specific brand and model (cascading filter)
@@ -3323,7 +3380,9 @@ async def translate_che168_text(request: TranslationRequest):
     - Batch translation of search results
     """
     try:
-        result = await che168_service.translate_text(request.text, request.target_language)
+        result = await che168_service.translate_text(
+            request.text, request.target_language
+        )
         return result
 
     except Exception as e:
@@ -3364,7 +3423,9 @@ async def test_che168_integration():
             "status": "success",
             "che168_api": {
                 "brands_available": brands_working,
-                "total_brand_groups": len(brands_result.result) if brands_working else 0,
+                "total_brand_groups": len(brands_result.result)
+                if brands_working
+                else 0,
                 "search_working": search_working,
                 "sample_cars_count": len(search_result.cars) if search_working else 0,
                 "proxy_status": che168_service.proxy_client is not None,
@@ -3436,7 +3497,9 @@ async def get_che168_car_info(info_id: int):
         return result
     except Exception as e:
         logger.error(f"Error in che168 car info endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Car info retrieval failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Car info retrieval failed: {str(e)}"
+        )
 
 
 @app.get("/api/che168/car/{info_id}/params", response_model=Che168CarParamsResponse)
@@ -3492,7 +3555,9 @@ async def get_che168_car_params(info_id: int):
         return result
     except Exception as e:
         logger.error(f"Error in che168 car params endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Car params retrieval failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Car params retrieval failed: {str(e)}"
+        )
 
 
 @app.get("/api/che168/car/{info_id}/analysis", response_model=Che168CarAnalysisResponse)
@@ -3544,7 +3609,9 @@ async def get_che168_car_analysis(info_id: int):
         return result
     except Exception as e:
         logger.error(f"Error in che168 car analysis endpoint: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Car analysis retrieval failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Car analysis retrieval failed: {str(e)}"
+        )
 
 
 @app.post("/api/che168/reset-circuit-breakers")
@@ -3584,7 +3651,9 @@ async def reset_che168_circuit_breakers():
         }
     except Exception as e:
         logger.error(f"Error resetting circuit breakers: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to reset circuit breakers: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to reset circuit breakers: {str(e)}"
+        )
 
 
 @app.post("/api/che168/clear-cache")
@@ -3650,7 +3719,9 @@ async def reset_che168_session():
         }
     except Exception as e:
         logger.error(f"Error resetting Che168 session: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to reset session: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to reset session: {str(e)}"
+        )
 
 
 @app.post("/api/che168/reset-all")
@@ -3686,7 +3757,9 @@ async def reset_all_che168_state():
         }
     except Exception as e:
         logger.error(f"Error resetting all Che168 state: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to reset all state: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to reset all state: {str(e)}"
+        )
 
 
 # =============================================================================
@@ -3696,8 +3769,7 @@ async def reset_all_che168_state():
 
 @app.post("/api/bikes/{bike_id}/customs", response_model=VLBCustomsResponse)
 async def calculate_bike_customs(
-    bike_id: str,
-    request: Optional[BikeCustomsRequest] = None
+    bike_id: str, request: Optional[BikeCustomsRequest] = None
 ):
     """
     Calculate customs duties for a specific bike using VLB broker
@@ -3719,39 +3791,38 @@ async def calculate_bike_customs(
         # Get bike details first
         bike_detail_response = await bike_service.get_bike_details(bike_id)
 
-        if not bike_detail_response.get("success") or not bike_detail_response.get("bike"):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Bike {bike_id} not found"
-            )
+        if not bike_detail_response.get("success") or not bike_detail_response.get(
+            "bike"
+        ):
+            raise HTTPException(status_code=404, detail=f"Bike {bike_id} not found")
 
         bike = bike_detail_response["bike"]
 
         # Extract year from bike data
         year = None
         if bike.year:
-            year_match = re.search(r'(\d{4})', bike.year)
+            year_match = re.search(r"(\d{4})", bike.year)
             if year_match:
                 year = int(year_match.group(1))
 
         if not year:
             raise HTTPException(
                 status_code=400,
-                detail=f"Could not extract year from bike data: {bike.year}"
+                detail=f"Could not extract year from bike data: {bike.year}",
             )
 
         # Extract engine displacement
         engine_volume = None
         if bike.engine_cc:
             # Extract numeric part from strings like "600cc" or "600cc(2종 소형 면허 필요)"
-            cc_match = re.search(r'(\d+)', bike.engine_cc)
+            cc_match = re.search(r"(\d+)", bike.engine_cc)
             if cc_match:
                 engine_volume = int(cc_match.group(1))
 
         if not engine_volume:
             raise HTTPException(
                 status_code=400,
-                detail=f"Could not extract engine displacement from bike data: {bike.engine_cc}"
+                detail=f"Could not extract engine displacement from bike data: {bike.engine_cc}",
             )
 
         # Parse bike price
@@ -3763,9 +3834,9 @@ async def calculate_bike_customs(
                     bike_price_krw = int(bike.price) * 10000
                 else:
                     # Try to extract numbers from any format
-                    price_match = re.search(r'(\d+(?:,\d{3})*)', bike.price)
+                    price_match = re.search(r"(\d+(?:,\d{3})*)", bike.price)
                     if price_match:
-                        price_str = price_match.group(1).replace(',', '')
+                        price_str = price_match.group(1).replace(",", "")
                         bike_price_krw = int(price_str) * 10000
             except (ValueError, AttributeError):
                 pass
@@ -3773,23 +3844,24 @@ async def calculate_bike_customs(
         if not bike_price_krw:
             raise HTTPException(
                 status_code=400,
-                detail=f"Could not extract price from bike data: {bike.price}"
+                detail=f"Could not extract price from bike data: {bike.price}",
             )
 
-        logger.info(f"Calculating customs for bike {bike_id}: {year} year, {engine_volume}cc, {bike_price_krw} KRW")
+        logger.info(
+            f"Calculating customs for bike {bike_id}: {year} year, {engine_volume}cc, {bike_price_krw} KRW"
+        )
 
         # Create VLB customs request
         vlb_request = VLBCustomsRequest(
-            price=bike_price_krw,
-            currency="KRW",
-            year=year,
-            engine_volume=engine_volume
+            price=bike_price_krw, currency="KRW", year=year, engine_volume=engine_volume
         )
 
         force_refresh = request.force_refresh if request else False
         result = await vlb_customs_service.calculate_customs(vlb_request, force_refresh)
 
-        logger.info(f"Customs calculation result for bike {bike_id}: success={result.success}")
+        logger.info(
+            f"Customs calculation result for bike {bike_id}: success={result.success}"
+        )
         return result
 
     except HTTPException:
@@ -3798,7 +3870,7 @@ async def calculate_bike_customs(
         logger.error(f"Error calculating customs for bike {bike_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to calculate customs for bike {bike_id}: {str(e)}"
+            detail=f"Failed to calculate customs for bike {bike_id}: {str(e)}",
         )
 
 
@@ -3833,16 +3905,16 @@ async def calculate_bike_turnkey_price(bike_id: str):
             return TurnkeyPriceResponse(
                 success=False,
                 bike_id=bike_id,
-                error="Failed to calculate customs duties"
+                error="Failed to calculate customs duties",
             )
 
         # Get bike details for price
         bike_detail_response = await bike_service.get_bike_details(bike_id)
-        if not bike_detail_response.get("success") or not bike_detail_response.get("bike"):
+        if not bike_detail_response.get("success") or not bike_detail_response.get(
+            "bike"
+        ):
             return TurnkeyPriceResponse(
-                success=False,
-                bike_id=bike_id,
-                error="Bike not found"
+                success=False, bike_id=bike_id, error="Bike not found"
             )
 
         bike = bike_detail_response["bike"]
@@ -3854,53 +3926,52 @@ async def calculate_bike_turnkey_price(bike_id: str):
                 if bike.price.isdigit():
                     bike_price_krw = int(bike.price) * 10000
                 else:
-                    price_match = re.search(r'(\d+(?:,\d{3})*)', bike.price)
+                    price_match = re.search(r"(\d+(?:,\d{3})*)", bike.price)
                     if price_match:
-                        price_str = price_match.group(1).replace(',', '')
+                        price_str = price_match.group(1).replace(",", "")
                         bike_price_krw = int(price_str) * 10000
             except (ValueError, AttributeError):
                 pass
 
         if not bike_price_krw:
             return TurnkeyPriceResponse(
-                success=False,
-                bike_id=bike_id,
-                error="Could not parse bike price"
+                success=False, bike_id=bike_id, error="Could not parse bike price"
             )
 
         # Use exchange rates from customs response or fallback rates
-        if customs_response.currency_rates and 'KRW' in customs_response.currency_rates:
+        if customs_response.currency_rates and "KRW" in customs_response.currency_rates:
             # VLB rate format: "59,8198 руб. за 1000 KRW"
-            krw_rate_text = customs_response.currency_rates['KRW']
-            krw_match = re.search(r'(\d+,?\d*)', krw_rate_text.replace(',', '.'))
-            krw_to_rub_rate = float(krw_match.group(1)) / 1000 if krw_match else 0.06  # fallback
+            krw_rate_text = customs_response.currency_rates["KRW"]
+            krw_match = re.search(r"(\d+,?\d*)", krw_rate_text.replace(",", "."))
+            krw_to_rub_rate = (
+                float(krw_match.group(1)) / 1000 if krw_match else 0.06
+            )  # fallback
         else:
             krw_to_rub_rate = 0.06  # Fallback rate: 60 RUB per 1000 KRW
 
-        if customs_response.currency_rates and 'USD' in customs_response.currency_rates:
-            usd_rate_text = customs_response.currency_rates['USD']
-            usd_match = re.search(r'(\d+,?\d*)', usd_rate_text.replace(',', '.'))
-            usd_to_rub_rate = float(usd_match.group(1)) if usd_match else 90.0  # fallback
+        if customs_response.currency_rates and "USD" in customs_response.currency_rates:
+            usd_rate_text = customs_response.currency_rates["USD"]
+            usd_match = re.search(r"(\d+,?\d*)", usd_rate_text.replace(",", "."))
+            usd_to_rub_rate = (
+                float(usd_match.group(1)) if usd_match else 90.0
+            )  # fallback
         else:
             usd_to_rub_rate = 90.0  # Fallback rate
 
         # Calculate turnkey price components
         components = vlb_customs_service.calculate_turnkey_price(
-            bike_price_krw,
-            customs_response.customs,
-            krw_to_rub_rate,
-            usd_to_rub_rate
+            bike_price_krw, customs_response.customs, krw_to_rub_rate, usd_to_rub_rate
         )
 
         # Calculate total turnkey price
         total_turnkey_price = (
-            components.base_price_rub +
-            components.markup_10_percent +
-            components.documents_fee +
-            components.korea_logistics_rub +
-            components.vladivostok_logistics_rub +
-            components.packaging_rub +
-            components.customs_total
+            components.base_price_rub
+            + components.markup_10_percent
+            + components.documents_fee
+            + components.korea_logistics_rub
+            + components.vladivostok_logistics_rub
+            + components.packaging_rub
+            + components.customs_total
         )
 
         logger.info(f"Turnkey price for bike {bike_id}: {total_turnkey_price} RUB")
@@ -3912,7 +3983,7 @@ async def calculate_bike_turnkey_price(bike_id: str):
             total_turnkey_price_rub=total_turnkey_price,
             customs_breakdown=customs_response.customs,
             exchange_rates=customs_response.currency_rates,
-            cached=customs_response.cached
+            cached=customs_response.cached,
         )
 
     except HTTPException:
@@ -3922,7 +3993,7 @@ async def calculate_bike_turnkey_price(bike_id: str):
         return TurnkeyPriceResponse(
             success=False,
             bike_id=bike_id,
-            error=f"Failed to calculate turnkey price: {str(e)}"
+            error=f"Failed to calculate turnkey price: {str(e)}",
         )
 
 
@@ -3935,12 +4006,14 @@ async def get_vlb_customs_stats():
     """
     try:
         stats = vlb_customs_service.get_service_stats()
-        return JSONResponse(content={
-            "success": True,
-            "stats": stats,
-            "service": "VLB Customs Service",
-            "version": "1.0.0"
-        })
+        return JSONResponse(
+            content={
+                "success": True,
+                "stats": stats,
+                "service": "VLB Customs Service",
+                "version": "1.0.0",
+            }
+        )
     except Exception as e:
         logger.error(f"Error getting VLB customs stats: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -3955,10 +4028,12 @@ async def clear_vlb_customs_cache():
     """
     try:
         vlb_customs_service.clear_cache()
-        return JSONResponse(content={
-            "success": True,
-            "message": "VLB customs cache cleared successfully"
-        })
+        return JSONResponse(
+            content={
+                "success": True,
+                "message": "VLB customs cache cleared successfully",
+            }
+        )
     except Exception as e:
         logger.error(f"Error clearing VLB customs cache: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
